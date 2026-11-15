@@ -70,6 +70,7 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .rkbonus { color: var(--win); }
 .heroproj { font-size: 13px; margin-top: 2px; }
 .heroproj b { color: var(--win); }
+.ba { font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.4; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .sclink { font-size: 13px; white-space: nowrap; margin-left: 6px; }
 .sctabs { display: flex; gap: 6px; margin: 10px 0 6px; flex-wrap: wrap; }
 .sctabs button { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 13px; }
@@ -209,7 +210,8 @@ svg.chart { width: 100%; height: auto; display: block; }
 .firstpick.sm button { min-height: 52px; font-size: 16px; padding: 6px; }
 .firstpick.sm button small { font-size: 12px; }
 .startrow { display: flex; gap: 10px; margin: 12px 0 10px; }
-.startrow #startBtn { flex: 1; min-height: 60px; font-size: 22px; font-weight: 700; border-radius: 12px; }
+.startrow #startBtn, .startrow #nextStep { flex: 1; min-height: 60px; font-size: 22px; font-weight: 700; border-radius: 12px; }
+.startrow #nextStep small { display: block; font-size: 13px; font-weight: 400; }
 .startrow #clearBtn { flex: 0 0 auto; }
 /* スコア入力画面: スマホ（375×667 程度）で1画面に収まる大きさ */
 body.scoring header { display: none; }
@@ -261,7 +263,8 @@ var pick = { 1: [], 2: [] };
 var filter = '';
 var meView = '', meFilter = '', meAllMatches = false;
 var adminKey = '';
-var startOpts = { scoring: 'throws', use_order: false, first_team: 1 }; // 標準は1投ごとの記録。結果だけ入力は予備
+var startOpts = { scoring: 'throws', use_order: true, first_team: null }; // 標準は1投ごとの記録（個人の投擲順あり）。結果だけ入力は予備
+var startStep = 1; // 試合開始: 1=メンバーを選ぶ、2=投擲順と先攻を決める（設計書 18.2）
 var scoringId = null;      // スコア入力中の試合
 var LC = {};               // 端末内の記録 { mid: { throws, leg3_first, leg_orders, base_rev, ver, sentVer, takeover, conflict, confirmEnd, draft } }
 var manualOpen = {};
@@ -536,39 +539,23 @@ function viewPlay() {
     playing.forEach(function (m) { h += matchCard(m); });
     h += '</div>';
   }
-  // 新しい試合
+  // 新しい試合（画面2: 投擲順と先攻後攻）
+  if (startStep === 2 && pick[1].length && pick[2].length && startOpts.scoring === 'throws') return h + viewStartStep2();
+  startStep = 1;
   h += '<div class="card"><h2>試合を始める</h2>';
   h += '<p class="muted">各チーム1〜' + max + '人。名前の横の「1」「2」でチームに入れます。×で外せます。</p>';
   h += '<div class="teams">' + [1, 2].map(function (t) {
-    var ord = startOpts.scoring === 'throws' && startOpts.use_order;
-    return '<div class="team t' + t + '"><h3>チーム' + t + '（' + pick[t].length + '人）' + (ord ? '　1セット目の投擲順' : '') + '</h3>' + pick[t].map(function (id, i) {
-      return '<span class="chip">' + (ord ? (i + 1) + '. ' : '') + esc(P(id).name) + ' ' + P(id).rating +
-        (ord && i > 0 ? '<button class="mini" data-up="' + esc(id) + '" data-team="' + t + '" aria-label="順番を上げる">↑</button>' : '') +
-        '<button class="mini" data-unpick="' + esc(id) + '" aria-label="外す">×</button></span>';
+    return '<div class="team t' + t + '"><h3>チーム' + t + '（' + pick[t].length + '人）</h3>' + pick[t].map(function (id) {
+      return '<span class="chip">' + esc(P(id).name) + ' ' + P(id).rating + '<button class="mini" data-unpick="' + esc(id) + '" aria-label="外す">×</button></span>';
     }).join('') + '</div>';
   }).join('') + '</div>';
-  if (pick[1].length && pick[2].length) {
-    var a1 = teamAvg(pick[1]), a2 = teamAvg(pick[2]);
-    var w1 = computeDelta(a1, a2, s), w2 = computeDelta(a2, a1, s);
-    h += '<div class="preview">平均レート チーム1 <b>' + a1.toFixed(1) + '</b> / チーム2 <b>' + a2.toFixed(1) + '</b><br>チーム1が勝てば 1: ' + sgn(w1.gain) + ' / 2: ' + sgn(-w1.loss) + '　チーム2が勝てば 1: ' + sgn(-w2.loss) + ' / 2: ' + sgn(w2.gain) + '<br><span class="muted">各メンバー全員に同じ値が反映されます' + (pick[1].concat(pick[2]).some(function (id) { return P(id).fixed; }) ? '（レート固定の人は変動しません）' : '') + '</span>';
-    if (pick[1].length === 1 && pick[2].length === 1) h += '<br><span class="muted">この2人の1vs1: ' + singles(pick[1][0], pick[2][0]) + ' / ' + n(s.max_singles_vs_same, 3) + '試合</span>';
-    h += '</div>';
-  }
-  h += '<div class="opt">';
-  if (startOpts.scoring !== 'throws') {
-    h += '<div class="warnbox" style="margin:0">予備: 結果だけ入力で始めます（1投ごとの記録はしません）。<br><a href="#" data-opt="scoring" data-v="throws">1投ごとに記録に戻す</a></div>';
-  } else {
-    h += '<div><b>1セット目に先攻するチーム</b> <span class="muted">（じゃんけんの勝ち）</span></div><div class="firstpick sm" style="margin-bottom:4px">' + [1, 2].map(function (t) {
-      return '<button data-opt="first_team" data-v="' + t + '" class="' + (startOpts.first_team === t ? 'on' : '') + '">チーム' + t + ' が先攻<small>' + (pick[t].length ? names(pick[t]) : '未選択') + '</small></button>';
-    }).join('') + '</div>';
-    if (pick[1].length === 1 && pick[2].length === 1) h += '<p style="margin:6px 0 0">✓ 個人戦なので、個人の投擲成績を必ず記録します</p>';
-    else h += '<label><input type="checkbox" id="useOrder"' + (startOpts.use_order ? ' checked' : '') + '> 個人の投擲順を入れる（投げる人を表示し、個人成績を記録）</label>';
-    if (startOpts.use_order && !(pick[1].length === 1 && pick[2].length === 1)) h += '<span class="muted">チームに入れた順が1セット目の投擲順です。↑で入れ替えられます。2セット目以降は各セットの開始時に選び直せます。</span>';
-  }
-  h += '</div>';
+  h += startPreview();
+  if (startOpts.scoring !== 'throws') h += '<div class="opt"><div class="warnbox" style="margin:0">予備: 結果だけ入力で始めます（1投ごとの記録はしません）。<br><a href="#" data-opt="scoring" data-v="throws">1投ごとに記録に戻す</a></div></div>';
   var foot = startOpts.scoring === 'throws' ? '<p class="muted" style="margin:4px 0 0;text-align:right"><a href="#" data-opt="scoring" data-v="manual" style="color:var(--muted);font-weight:400">予備: 結果だけ入力で始める</a></p>' : '';
   var canStart = pick[1].length && pick[2].length;
-  h += '<div class="startrow"><button class="btn" id="startBtn"' + (canStart ? '' : ' disabled') + '>試合開始</button><button class="btn ghost" id="clearBtn">クリア</button></div>' + foot;
+  h += '<div class="startrow">' + (startOpts.scoring === 'throws'
+      ? '<button class="btn" id="nextStep"' + (canStart ? '' : ' disabled') + '>次へ<small>投擲順・先攻を決める</small></button>'
+      : '<button class="btn" id="startBtn"' + (canStart ? '' : ' disabled') + '>試合開始</button>') + '<button class="btn ghost" id="clearBtn">クリア</button></div>' + foot;
   h += '<input type="search" id="filter" placeholder="名前で絞り込み" value="' + esc(filter) + '" style="width:100%;margin-bottom:8px">';
   h += '<div class="plist">';
   var picked = {}; pick[1].concat(pick[2]).forEach(function (id) { picked[id] = 1; });
@@ -581,6 +568,41 @@ function viewPlay() {
     });
   h += '</div></div>';
   return h;
+}
+
+function startPreview() {
+  var s = S.settings;
+  if (!(pick[1].length && pick[2].length)) return '';
+  var a1 = teamAvg(pick[1]), a2 = teamAvg(pick[2]);
+  var w1 = computeDelta(a1, a2, s), w2 = computeDelta(a2, a1, s);
+  var h = '<div class="preview">平均レート チーム1 <b>' + a1.toFixed(1) + '</b> / チーム2 <b>' + a2.toFixed(1) + '</b><br>チーム1が勝てば 1: ' + sgn(w1.gain) + ' / 2: ' + sgn(-w1.loss) + '　チーム2が勝てば 1: ' + sgn(-w2.loss) + ' / 2: ' + sgn(w2.gain) +
+    '<br><span class="muted">各メンバー全員に同じ値が反映されます' + (pick[1].concat(pick[2]).some(function (id) { return P(id).fixed; }) ? '（レート固定の人は変動しません）' : '') + '</span>';
+  if (pick[1].length === 1 && pick[2].length === 1) h += '<br><span class="muted">この2人の1vs1: ' + singles(pick[1][0], pick[2][0]) + ' / ' + n(s.max_singles_vs_same, 3) + '試合</span>';
+  return h + '</div>';
+}
+// 試合開始の画面2: 1セット目の先攻と、個人の投擲順（最初から入れる。入れない場合はチェック）
+function viewStartStep2() {
+  var solo = pick[1].length === 1 && pick[2].length === 1, ord = solo || startOpts.use_order;
+  var h = '<div class="card"><button class="btn small ghost" id="backStep">‹ メンバー選択に戻る</button><h2 style="margin-top:10px">投擲順と先攻を決める</h2>';
+  h += '<div><b>1セット目に先攻するチーム</b> <span class="muted">（じゃんけんの勝ち）</span></div><div class="firstpick">' + [1, 2].map(function (t) {
+    return '<button data-opt="first_team" data-v="' + t + '" class="' + (startOpts.first_team === t ? 'on' : '') + '">チーム' + t + ' が先攻<small>' + names(pick[t]) + '</small></button>';
+  }).join('') + '</div>';
+  if (solo) h += '<p style="margin:10px 0 0">✓ 個人戦なので、個人の投擲成績を必ず記録します</p>';
+  else {
+    if (ord) {
+      h += '<div style="margin-top:12px"><b>1セット目の投擲順</b> <span class="muted">（↑で入れ替え。2セット目以降は各セットの開始時に選び直します）</span></div>';
+      h += '<div class="teams">' + [1, 2].map(function (t) {
+        return '<div class="team t' + t + '"><h3>チーム' + t + '</h3><ul class="olist">' + pick[t].map(function (id, i) {
+          return '<li><span>' + (i + 1) + '. ' + esc(P(id).name) + '</span>' + (i > 0 ? '<button class="btn small ghost" data-up="' + esc(id) + '" data-team="' + t + '">↑</button>' : '') + '</li>';
+        }).join('') + '</ul></div>';
+      }).join('') + '</div>';
+    }
+    h += '<label class="muted" style="display:block;margin-top:10px;font-size:14px"><input type="checkbox" id="noOrder"' + (ord ? '' : ' checked') + '> 個人の投擲順を入れない（チームとしてだけ記録する）</label>';
+  }
+  var ready = startOpts.first_team === 1 || startOpts.first_team === 2;
+  h += '<div class="startrow" style="margin-top:14px"><button class="btn" id="startBtn"' + (ready ? '' : ' disabled') + '>試合開始</button></div>';
+  if (!ready) h += '<p class="muted" style="margin:4px 0 0;text-align:center">先攻するチームを選んでください</p>';
+  return h + '</div>';
 }
 
 function manualForm(m) {
@@ -825,6 +847,22 @@ var scoreSel = null; // 試合中に見ているセット { mid, leg, len }（�
 var histTbl = {};    // 読み込んだ試合の投擲 { match_id: { loading, data, error } }（履歴タブ・個人ページで共有）
 
 /* ---- 履歴 ---- */
+// 試合前後のレート（設計書 18.1）。個人戦は「1524 → 1548」、チーム戦は1人1行で名前つき。レート固定の人は「1800（固定）」
+var histIndex = null, histIndexOf = null;
+function rateAt(id, mid) {
+  if (histIndexOf !== S.history) { histIndex = {}; histIndexOf = S.history; Object.keys(S.history || {}).forEach(function (pid) { (S.history[pid] || []).forEach(function (x) { histIndex[pid + '|' + x.match_id] = x; }); }); }
+  return histIndex[id + '|' + mid];
+}
+function rateBA(m, ids) {
+  if (m.status !== 'done') return '';
+  var lines = ids.map(function (id) {
+    var p = P(id), x = rateAt(id, m.id), nm = ids.length > 1 ? esc(p.name) + ' ' : '';
+    if (p.fixed) return nm + p.rating + '（固定）';
+    if (!x) return '';
+    return nm + (x.rating - x.delta) + ' → ' + x.rating;
+  }).filter(Boolean);
+  return lines.length ? '<div class="ba">' + lines.join('<br>') + '</div>' : '';
+}
 function histScore(m) {
   if (m.scoring !== 'throws' || m.status !== 'done') return '';
   return '<div style="margin-top:6px"><a href="#" class="sclink" data-sct="' + esc(m.id) + '">スコア表 ›</a></div>';
@@ -838,7 +876,7 @@ function viewScoreScreen() {
   if (!m) return h + '<p class="muted">試合が見つかりません</p></div>';
   var w = m.winner;
   h += '<div class="muted" style="margin-top:10px">' + fmt(m.started_at) + '</div>' +
-    '<div class="match" style="border:0;padding:4px 0"><div class="vs"><div class="side t1">' + (w === 1 ? '◎ ' : '') + names(m.team1) + '<br>' + sgn(m.delta1) + '</div><div class="muted">' + m.legs1 + '-' + m.legs2 + '</div><div class="side t2">' + (w === 2 ? '◎ ' : '') + names(m.team2) + '<br>' + sgn(m.delta2) + '</div></div></div>';
+    '<div class="match" style="border:0;padding:4px 0"><div class="vs"><div class="side t1">' + (w === 1 ? '◎ ' : '') + names(m.team1) + '<br>' + sgn(m.delta1) + rateBA(m, m.team1) + '</div><div class="muted">' + m.legs1 + '-' + m.legs2 + '</div><div class="side t2">' + (w === 2 ? '◎ ' : '') + names(m.team2) + '<br>' + sgn(m.delta2) + rateBA(m, m.team2) + '</div></div></div>';
   if (x.loading || (!x.data && !x.error)) h += '<p class="muted">読み込み中…</p>';
   else if (x.error) h += '<p class="muted">' + esc(x.error) + '</p>';
   else {
@@ -866,7 +904,7 @@ function viewLog() {
   if (!list.length) h += '<p class="muted">まだ試合がありません</p>';
   list.slice(0, 200).forEach(function (m) {
     var w = m.winner;
-    h += '<div class="match"><div class="vs"><div class="side t1">' + (w === 1 ? '◎ ' : '') + names(m.team1) + '<br>' + sgn(m.delta1) + '</div><div class="muted">' + (m.status === 'void' ? '無効' : m.legs1 + '-' + m.legs2) + '</div><div class="side t2">' + (w === 2 ? '◎ ' : '') + names(m.team2) + '<br>' + sgn(m.delta2) + '</div></div><div class="meta">' + fmt(m.started_at) + (m.leg_scores && m.status === 'done' ? '　' + m.leg_scores.map(function (x, i) { return (i + 1) + 'セット目 ' + x[0] + '-' + x[1]; }).join(' / ') : (m.score1 !== '' && m.score1 !== null && m.score1 !== undefined ? '　得点 ' + m.score1 + '-' + m.score2 : '')) + (m.note ? '　' + esc(m.note) : '') + '</div>' + histScore(m) + '</div>';
+    h += '<div class="match"><div class="vs"><div class="side t1">' + (w === 1 ? '◎ ' : '') + names(m.team1) + '<br>' + sgn(m.delta1) + rateBA(m, m.team1) + '</div><div class="muted">' + (m.status === 'void' ? '無効' : m.legs1 + '-' + m.legs2) + '</div><div class="side t2">' + (w === 2 ? '◎ ' : '') + names(m.team2) + '<br>' + sgn(m.delta2) + rateBA(m, m.team2) + '</div></div><div class="meta">' + fmt(m.started_at) + (m.leg_scores && m.status === 'done' ? '　' + m.leg_scores.map(function (x, i) { return (i + 1) + 'セット目 ' + x[0] + '-' + x[1]; }).join(' / ') : (m.score1 !== '' && m.score1 !== null && m.score1 !== undefined ? '　得点 ' + m.score1 + '-' + m.score2 : '')) + (m.note ? '　' + esc(m.note) : '') + '</div>' + histScore(m) + '</div>';
   });
   return h + '</div>';
 }
@@ -1042,11 +1080,13 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-pick],[data-unpick],[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#useOrder,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#missThrow,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-pick],[data-unpick],[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#missThrow,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
-  if (t.id !== 'useOrder') e.preventDefault();
+  if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
-  if (t.id === 'useOrder') { startOpts.use_order = t.checked; render(); return; }
+  if (t.id === 'noOrder') { startOpts.use_order = !t.checked; render(); return; }
+  if (t.id === 'nextStep') { startStep = 2; render(); window.scrollTo(0, 0); return; }
+  if (t.id === 'backStep') { startStep = 1; render(); window.scrollTo(0, 0); return; }
   if (d.opt) { startOpts[d.opt] = d.opt === 'first_team' ? Number(d.v) : d.v; render(); return; }
   if (d.up) { var arr = pick[d.team], i = arr.indexOf(d.up); if (i > 0) { arr.splice(i, 1); arr.splice(i - 1, 0, d.up); } render(); return; }
   if (d.score) { openScoring(d.score); return; }
@@ -1072,12 +1112,12 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (t.id === 'meAll') { meAllMatches = !meAllMatches; render(); return; }
   if (d.eblist) { var lk = meView + ':' + d.eblist; listOpen[lk] = !listOpen[lk]; render(); return; }
   if (d.me) { meView = d.me; tab = 'me'; render(); window.scrollTo(0, 0); return; }
-  if (t.id === 'clearBtn') { pick = { 1: [], 2: [] }; render(); return; }
+  if (t.id === 'clearBtn') { pick = { 1: [], 2: [] }; startOpts.first_team = null; render(); return; }
   if (t.id === 'startBtn') { t.disabled = true; startSending++; showSendNotice(); var opts = { team1: pick[1], team2: pick[2], scoring: startOpts.scoring, use_order: startOpts.scoring === 'throws' && (startOpts.use_order || (pick[1].length === 1 && pick[2].length === 1)), first_team: startOpts.first_team };
     act('start', opts, '試合を開始しました').then(function (ok) {
       startSending--; showSendNotice();
       if (!ok) return;
-      pick = { 1: [], 2: [] }; startOpts.scoring = 'throws';
+      pick = { 1: [], 2: [] }; startOpts = { scoring: 'throws', use_order: true, first_team: null }; startStep = 1;
       if (opts.scoring === 'throws') { var nm = S.matches.filter(function (x) { return x.status === 'playing' && x.started_by === '端末' + deviceId(); })[0]; if (nm) { openScoring(nm.id); return; } }
       render();
     }); return; }
