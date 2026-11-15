@@ -83,9 +83,15 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .hmside .ba span { display: block; margin-right: 0; }
 .hmname { font-size: 15px; }
 .hmside.t1 .hmname { color: var(--t1); } .hmside.t2 .hmname { color: var(--t2); }
-.hmside.win .hmname { font-weight: 700; }
-.hmwin { display: inline-block; padding: 0 4px; margin-right: 4px; font-size: 11px; border-radius: 4px; background: var(--win); color: #fff; vertical-align: 1px; }
-.hmlegs { align-self: center; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hmside.win .hmname { font-weight: 800; }
+.hmside.lose .hmname { opacity: .55; }
+.hmmid { text-align: center; padding-top: 2px; }
+.hmlegs { font-size: 22px; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.1; }
+.hmlegs b { font-weight: 800; }
+.hmlegs span { font-weight: 500; color: var(--muted); }
+.hmlegs i { font-style: normal; color: var(--muted); margin: 0 4px; font-size: 16px; }
+.hmsetsc { margin-top: 3px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.35; }
+.hmsetsc span { display: block; white-space: nowrap; }
 .hmdelta { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
 .hmdelta.up { color: var(--win); } .hmdelta.down { color: var(--lose); }
 .hmsets { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -901,13 +907,16 @@ function histCard(m, inScreen) {
   var w = m.winner, isVoid = m.status === 'void', solo = m.team1.length === 1 && m.team2.length === 1;
   var side = function (t) {
     var ids = t === 1 ? m.team1 : m.team2, d = t === 1 ? m.delta1 : m.delta2, won = w === t && !isVoid;
-    return '<div class="hmside t' + t + (won ? ' win' : '') + '"><div class="hmname">' + (won ? '<b class="hmwin">勝</b>' : '') + names(ids) + '</div>' +
+    return '<div class="hmside t' + t + (won ? ' win' : !isVoid && w ? ' lose' : '') + '"><div class="hmname">' + names(ids) + '</div>' +
       (isVoid ? '' : '<div class="hmdelta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '') + '">' + sgn(d) + '</div>') + rateBA(m, ids) + '</div>';
   };
-  var sets = m.leg_scores && m.status === 'done' ? m.leg_scores.map(function (x) { return x[0] + '-' + x[1]; }).join(' / ') : (m.score1 !== '' && m.score1 !== null && m.score1 !== undefined ? '得点 ' + m.score1 + '-' + m.score2 : '');
+  // 真ん中: 取ったセット数（勝った側を強調）と、その下に各セットの点数（結果だけ入力の試合は得点）
+  var lg = function (t) { var v = t === 1 ? m.legs1 : m.legs2; return w === t ? '<b>' + v + '</b>' : '<span>' + v + '</span>'; };
+  var sets = m.leg_scores && m.status === 'done' ? m.leg_scores.map(function (x) { return '<span>' + x[0] + '-' + x[1] + '</span>'; }).join('') : (m.score1 !== '' && m.score1 !== null && m.score1 !== undefined ? '<span>得点 ' + m.score1 + '-' + m.score2 + '</span>' : '');
+  var mid = '<div class="hmmid"><div class="hmlegs">' + (isVoid ? '-' : lg(1) + '<i>-</i>' + lg(2)) + '</div>' + (sets && !isVoid ? '<div class="hmsetsc">' + sets + '</div>' : '') + '</div>';
   return '<div class="hm' + (isVoid ? ' void' : '') + '"><div class="hmhead"><span>' + fmt(m.started_at) + '</span><span class="badge">' + (solo ? '個人戦' : 'チーム戦') + '</span>' + (isVoid ? '<span class="badge warn">無効</span>' : '') +
     (!inScreen && m.scoring === 'throws' && m.status === 'done' ? '<a href="#" class="sclink" data-sct="' + esc(m.id) + '">スコア表 ›</a>' : '') + '</div>' +
-    '<div class="hmvs">' + side(1) + '<div class="hmlegs">' + (isVoid ? '-' : m.legs1 + ' - ' + m.legs2) + '</div>' + side(2) + '</div>' + (sets ? '<div class="hmsets">' + (m.leg_scores ? 'セット ' : '') + sets + '</div>' : '') + (m.note ? '<div class="hmsets">' + esc(m.note) + '</div>' : '') + '</div>';
+    '<div class="hmvs">' + side(1) + mid + side(2) + '</div>' + (m.note ? '<div class="hmsets">' + esc(m.note) + '</div>' : '') + '</div>';
 }
 function histScore(m) {
   if (m.scoring !== 'throws' || m.status !== 'done') return '';
