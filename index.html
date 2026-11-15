@@ -144,13 +144,20 @@ details.sec[open] summary { margin-bottom: 8px; }
 .team h3 { margin: 0 0 6px; font-size: 13px; }
 .team.t1 h3 { color: var(--t1); } .team.t2 h3 { color: var(--t2); }
 .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin: 2px; font-size: 13px; cursor: pointer; }
-.plist { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 340px; overflow-y: auto; }
-.pitem { display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px 5px 10px; font-size: 14px; }
-.pitem.off { opacity: .4; }
-.pitem .pick { display: flex; gap: 4px; }
-.pitem .pick button { width: 30px; height: 28px; border-radius: 6px; border: 1px solid; font-weight: 700; cursor: pointer; background: var(--card); }
-.pitem .pick .b1 { border-color: var(--t1); color: var(--t1); }
-.pitem .pick .b2 { border-color: var(--t2); color: var(--t2); }
+button.teambox { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; width: 100%; text-align: left; border: 2px dashed transparent; cursor: pointer; font: inherit; color: inherit; min-height: 96px; }
+button.teambox:active { filter: brightness(.95); }
+.tbname { font-size: 15px; padding: 2px 0; }
+.tbname .muted { font-size: 12px; }
+.tbempty { color: var(--muted); font-size: 14px; padding: 14px 0; text-align: center; }
+.tplist { display: flex; flex-direction: column; gap: 6px; padding-bottom: 76px; }
+.tprow { display: grid; grid-template-columns: 2.2em 1fr auto; align-items: center; gap: 6px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px; background: var(--card); color: var(--ink); font: inherit; font-size: 16px; cursor: pointer; }
+.tprow.on { border-width: 2px; font-weight: 700; }
+.tprow.on.t1 { border-color: var(--t1); background: color-mix(in srgb, var(--t1) 12%, var(--card)); }
+.tprow.on.t2 { border-color: var(--t2); background: color-mix(in srgb, var(--t2) 12%, var(--card)); }
+.tprow:disabled { opacity: .45; cursor: default; }
+.tpno { font-weight: 700; color: var(--muted); }
+.tpfoot { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); z-index: 15; }
+.tpfoot .btn { max-width: 720px; margin: 0 auto; display: block; width: 100%; min-height: 52px; font-size: 18px; font-weight: 700; }
 .preview { background: var(--bg); border-radius: 10px; padding: 10px; font-size: 14px; margin: 8px 0; }
 .up { color: var(--win); font-weight: 700; } .down { color: var(--lose); font-weight: 700; }
 input[type=search], input[type=number], input[type=password], select { font-size: 15px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
@@ -539,46 +546,52 @@ function viewPlay() {
     playing.forEach(function (m) { h += matchCard(m); });
     h += '</div>';
   }
+  if (teamPick) return viewTeamPick();
   // 新しい試合（画面2: 投擲順と先攻後攻）
   if (startStep === 2 && pick[1].length && pick[2].length && startOpts.scoring === 'throws') return h + viewStartStep2();
   startStep = 1;
   h += '<div class="card"><h2>試合を始める</h2>';
-  h += '<p class="muted">各チーム1〜' + max + '人。名前の横の「1」「2」でチームに入れます。×で外せます。</p>';
+  h += '<p class="muted">チームの枠をタップして選手を選びます（各チーム1〜' + max + '人）。</p>';
   h += '<div class="teams">' + [1, 2].map(function (t) {
-    return '<div class="team t' + t + '"><h3>チーム' + t + '（' + pick[t].length + '人）</h3>' + pick[t].map(function (id) {
-      return '<span class="chip">' + esc(P(id).name) + ' ' + P(id).rating + '<button class="mini" data-unpick="' + esc(id) + '" aria-label="外す">×</button></span>';
-    }).join('') + '</div>';
+    return '<button class="team t' + t + ' teambox" data-teampick="' + t + '"><h3>チーム' + t + '（' + pick[t].length + '人）</h3>' +
+      (pick[t].length ? pick[t].map(function (id) { return '<div class="tbname">' + esc(P(id).name) + ' <span class="muted">' + P(id).rating + '</span></div>'; }).join('') : '<div class="tbempty">タップして選手を選ぶ</div>') + '</button>';
   }).join('') + '</div>';
   h += startPreview();
   if (startOpts.scoring !== 'throws') h += '<div class="opt"><div class="warnbox" style="margin:0">予備: 結果だけ入力で始めます（1投ごとの記録はしません）。<br><a href="#" data-opt="scoring" data-v="throws">1投ごとに記録に戻す</a></div></div>';
   var foot = startOpts.scoring === 'throws' ? '<p class="muted" style="margin:4px 0 0;text-align:right"><a href="#" data-opt="scoring" data-v="manual" style="color:var(--muted);font-weight:400">予備: 結果だけ入力で始める</a></p>' : '';
-  var canStart = pick[1].length && pick[2].length;
+  var canStart = pick[1].length && pick[2].length && !singlesFull();
   h += '<div class="startrow">' + (startOpts.scoring === 'throws'
       ? '<button class="btn" id="nextStep"' + (canStart ? '' : ' disabled') + '>次へ<small>投擲順・先攻を決める</small></button>'
       : '<button class="btn" id="startBtn"' + (canStart ? '' : ' disabled') + '>試合開始</button>') + '<button class="btn ghost" id="clearBtn">クリア</button></div>' + foot;
-  h += '<input type="search" id="filter" placeholder="名前で絞り込み" value="' + esc(filter) + '" style="width:100%;margin-bottom:8px">';
-  h += '<div class="plist">';
-  var picked = {}; pick[1].concat(pick[2]).forEach(function (id) { picked[id] = 1; });
-  S.players.filter(function (p) { return p.active && (!filter || p.name.indexOf(filter) >= 0); })
-    .sort(function (a, b) { return a.name.localeCompare(b.name, 'ja'); })
-    .forEach(function (p) {
-      var off = busy[p.id] || picked[p.id];
-      h += '<div class="pitem' + (off ? ' off' : '') + '"><span>' + esc(p.name) + ' <span class="muted">' + p.rating + (p.fixed ? '固定' : '') + (busy[p.id] ? ' 試合中' : '') + '</span></span>' +
-        (off ? '' : '<span class="pick"><button class="b1" data-pick="1" data-id="' + esc(p.id) + '"' + (pick[1].length >= max ? ' disabled' : '') + '>1</button><button class="b2" data-pick="2" data-id="' + esc(p.id) + '"' + (pick[2].length >= max ? ' disabled' : '') + '>2</button></span>') + '</div>';
-    });
   h += '</div></div>';
   return h;
 }
 
+function singlesFull() { // 同じ2人の1vs1が上限に達しているか（設計書 19.1）
+  return pick[1].length === 1 && pick[2].length === 1 && singles(pick[1][0], pick[2][0]) >= n(S.settings.max_singles_vs_same, 3);
+}
 function startPreview() {
-  var s = S.settings;
   if (!(pick[1].length && pick[2].length)) return '';
-  var a1 = teamAvg(pick[1]), a2 = teamAvg(pick[2]);
-  var w1 = computeDelta(a1, a2, s), w2 = computeDelta(a2, a1, s);
-  var h = '<div class="preview">平均レート チーム1 <b>' + a1.toFixed(1) + '</b> / チーム2 <b>' + a2.toFixed(1) + '</b><br>チーム1が勝てば 1: ' + sgn(w1.gain) + ' / 2: ' + sgn(-w1.loss) + '　チーム2が勝てば 1: ' + sgn(-w2.loss) + ' / 2: ' + sgn(w2.gain) +
-    '<br><span class="muted">各メンバー全員に同じ値が反映されます' + (pick[1].concat(pick[2]).some(function (id) { return P(id).fixed; }) ? '（レート固定の人は変動しません）' : '') + '</span>';
-  if (pick[1].length === 1 && pick[2].length === 1) h += '<br><span class="muted">この2人の1vs1: ' + singles(pick[1][0], pick[2][0]) + ' / ' + n(s.max_singles_vs_same, 3) + '試合</span>';
-  return h + '</div>';
+  var h = '<div class="preview">平均レート チーム1 <b>' + teamAvg(pick[1]).toFixed(1) + '</b> ／ チーム2 <b>' + teamAvg(pick[2]).toFixed(1) + '</b></div>';
+  if (singlesFull()) h += '<div class="warnbox">この2人の1vs1は上限の' + n(S.settings.max_singles_vs_same, 3) + '試合に達しています</div>';
+  return h;
+}
+// 選手選び画面（設計書 19.2）。teamPick = { t, sel: [選んだ順のID] }。確定するまで pick は変えない
+var teamPick = null;
+function viewTeamPick() {
+  var t = teamPick.t, sel = teamPick.sel, other = pick[3 - t], max = n(S.settings.max_team_size, 4), busy = busySet();
+  var h = '<div class="card tpick"><button class="btn small ghost" id="tpBack">‹ 戻る</button><h2 style="margin-top:10px">チーム' + t + 'の選手を選ぶ <span class="muted" style="font-size:13px;font-weight:400">（最大' + max + '人）</span></h2>';
+  h += '<input type="search" id="filter" placeholder="名前で絞り込み" value="' + esc(filter) + '" style="width:100%;margin-bottom:8px">';
+  h += '<div class="tplist">';
+  S.players.filter(function (p) { return p.active && (!filter || p.name.indexOf(filter) >= 0 || sel.indexOf(p.id) >= 0); })
+    .sort(function (a, b) { return a.name.localeCompare(b.name, 'ja'); })
+    .forEach(function (p) {
+      var k = sel.indexOf(p.id), inOther = other.indexOf(p.id) >= 0, off = k < 0 && (inOther || busy[p.id] || sel.length >= max);
+      h += '<button class="tprow' + (k >= 0 ? ' on t' + t : '') + '" data-tp="' + esc(p.id) + '"' + (off ? ' disabled' : '') + '><span class="tpno">' + (k >= 0 ? (k + 1) + '.' : '') + '</span><span class="tpname">' + esc(p.name) + '</span>' +
+        '<span class="muted">' + (inOther ? 'チーム' + (3 - t) : busy[p.id] ? '試合中' : p.rating + (p.fixed ? ' 固定' : '')) + '</span></button>';
+    });
+  h += '</div><div class="tpfoot"><button class="btn wide" id="tpOk">確定（' + sel.length + '人）</button></div></div>';
+  return h;
 }
 // 試合開始の画面2: 1セット目の先攻と、個人の投擲順（最初から入れる。入れない場合はチェック）
 function viewStartStep2() {
@@ -1070,7 +1083,7 @@ function adminRow(m) {
 
 /* ---- イベント ---- */
 document.getElementById('adminBtn').addEventListener('click', function () { scoreView = null; tab = 'admin'; render(); window.scrollTo(0, 0); });
-document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; tab = b.dataset.tab; render(); } });
+document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; tab = b.dataset.tab; render(); } });
 document.getElementById('main').addEventListener('toggle', function (e) { var k = e.target.dataset && e.target.dataset.sec; if (k) store('kamo_sec_' + k, e.target.open ? '1' : '0'); }, true);
 document.getElementById('main').addEventListener('input', function (e) { if (e.target.id === 'meFilter') { meFilter = e.target.value; var p0 = e.target.selectionStart; render(); var f0 = document.getElementById('meFilter'); f0.focus(); f0.setSelectionRange(p0, p0); return; } if (e.target.id === 'filter') { filter = e.target.value; var pos = e.target.selectionStart; render(); var f = document.getElementById('filter'); f.focus(); f.setSelectionRange(pos, pos); } });
 document.getElementById('main').addEventListener('change', function (e) { if (e.target.id === 'meView') { meView = e.target.value; meAllMatches = false; store('kamo_view', meView); render(); } });
@@ -1080,11 +1093,14 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-pick],[data-unpick],[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#missThrow,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#missThrow,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
   if (t.id === 'noOrder') { startOpts.use_order = !t.checked; render(); return; }
+  if (d.teampick) { var tt = Number(d.teampick); teamPick = { t: tt, sel: pick[tt].slice(), y: window.scrollY || 0 }; filter = ''; render(); window.scrollTo(0, 0); return; }
+  if (d.tp) { var ts = teamPick.sel, ti = ts.indexOf(d.tp); if (ti >= 0) ts.splice(ti, 1); else ts.push(d.tp); render(); return; }
+  if (t.id === 'tpOk' || t.id === 'tpBack') { if (t.id === 'tpOk') pick[teamPick.t] = teamPick.sel.slice(); var ty = teamPick.y; teamPick = null; filter = ''; render(); window.scrollTo(0, ty); return; }
   if (t.id === 'nextStep') { startStep = 2; render(); window.scrollTo(0, 0); return; }
   if (t.id === 'backStep') { startStep = 1; render(); window.scrollTo(0, 0); return; }
   if (d.opt) { startOpts[d.opt] = d.opt === 'first_team' ? Number(d.v) : d.v; render(); return; }
@@ -1107,8 +1123,6 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (t.id === 'closeScore') { scoringId = null; render(); return; }
   if (t.id === 'forceMine') { var lf = LC[scoringId]; lf.conflict = null; lf.takeover = true; lf.ver++; lcSave(scoringId); queueSync(true); render(); return; }
   if (t.id === 'reloadServer') { var rid = scoringId; lcDrop(rid); call('state').then(function (dd) { S = dd; openScoring(rid); }); return; }
-  if (d.pick) { pick[d.pick].push(d.id); render(); return; }
-  if (d.unpick) { pick[1] = pick[1].filter(function (x) { return x !== d.unpick; }); pick[2] = pick[2].filter(function (x) { return x !== d.unpick; }); render(); return; }
   if (t.id === 'meAll') { meAllMatches = !meAllMatches; render(); return; }
   if (d.eblist) { var lk = meView + ':' + d.eblist; listOpen[lk] = !listOpen[lk]; render(); return; }
   if (d.me) { meView = d.me; tab = 'me'; render(); window.scrollTo(0, 0); return; }

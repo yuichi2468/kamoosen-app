@@ -54,10 +54,26 @@ const server = http.createServer((req, res) => {
   await page.screenshot({ path: path.join(out, '1_ranking.png'), fullPage: true });
 
   await page.click('nav button[data-tab=play]');
-  await page.click('button.b1[data-id=P04]');
-  await page.click('button.b1[data-id=P11]');
-  await page.click('button.b2[data-id=A]');
+  // チームの枠をタップ → 選手を選ぶ → 確定（設計書 19.2）
+  const pickTeam = async (t, ids, shot) => {
+    await page.click('[data-teampick="' + t + '"]');
+    await page.waitForSelector('.tplist');
+    for (const id of ids) await page.click('[data-tp="' + id + '"]');
+    if (shot) await page.screenshot({ path: path.join(out, shot), fullPage: false });
+    await page.click('#tpOk');
+    await page.waitForSelector('[data-teampick]');
+  };
+  // 戻る（キャンセル）は反映しない
+  await page.click('[data-teampick="1"]'); await page.click('[data-tp=P04]'); await page.click('#tpBack');
+  if (!(await page.textContent('[data-teampick="1"]')).includes('タップして選手を選ぶ')) throw new Error('戻るで反映されている');
+  await pickTeam(1, ['P04', 'P11'], '2a_team_pick.png');
+  await pickTeam(2, ['A']);
+  // 相手チームの人は選べない
+  await page.click('[data-teampick="2"]');
+  if (!(await page.isDisabled('[data-tp=P04]'))) throw new Error('相手チームの人が選べる');
+  await page.click('#tpBack');
   await page.waitForSelector('.preview');
+  if ((await page.textContent('.preview')).includes('勝てば')) throw new Error('増減の見込みが残っている');
   const preview = await page.textContent('.preview');
   await page.screenshot({ path: path.join(out, '2_start.png'), fullPage: true });
   await page.click('[data-opt=scoring][data-v=manual]');
@@ -97,14 +113,19 @@ const server = http.createServer((req, res) => {
 
   // ---- 1投ごとの記録（個人の投擲順あり） ----
   await page.click('nav button[data-tab=play]');
-  await page.click('button.b1[data-id=P05]');
-  await page.click('button.b2[data-id=P07]');
+  await pickTeam(1, ['P05']);
+  await pickTeam(2, ['P07']);
+  // 1vs1 が上限に達しているときだけ警告し、次へを押せない（設計書 19.1）
+  if (await page.$('.warnbox')) throw new Error('上限前なのに警告が出ている');
+  await page.evaluate(() => { S.singles['P05|P07'] = 3; render(); });
+  if (!(await page.textContent('#main')).includes('上限の3試合に達しています') || !(await page.isDisabled('#nextStep'))) throw new Error('1vs1上限の警告が出ない');
+  await page.evaluate(() => { delete S.singles['P05|P07']; render(); });
   await page.click('#nextStep'); // 画面2へ
   if (!(await page.textContent('#main')).includes('個人戦なので')) throw new Error('個人戦の表示がない');
   if (await page.$('#noOrder')) throw new Error('個人戦に「投擲順を入れない」が出ている');
   await page.screenshot({ path: path.join(out, '7a_start_solo.png'), fullPage: true });
   await page.click('#backStep');
-  await page.click('button.b1[data-id=P06]');
+  await pickTeam(1, ['P06']); // 大西に加藤を追加（選んだ順が投擲順）
   await page.click('#nextStep');
   if (!(await page.isDisabled('#startBtn'))) throw new Error('先攻を選ぶ前に試合開始が押せる');
   if (!(await page.$('.olist'))) throw new Error('投擲順が最初から出ていない');
