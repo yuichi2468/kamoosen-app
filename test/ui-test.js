@@ -85,6 +85,9 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('svg.chart');
   await page.screenshot({ path: path.join(out, '4_me.png'), fullPage: true });
   await page.click('nav button[data-tab=log]');
+  const ba = await page.$$eval('.match .ba', x => x.map(y => y.innerText.replace(/\n/g, ' / ')));
+  console.log('history before/after:', JSON.stringify(ba.slice(0, 4)));
+  if (!ba.some(x => /1800（固定）/.test(x)) || !ba.some(x => /^\d+ → \d+$/.test(x))) throw new Error('変動前後のレートが出ていない');
   await page.screenshot({ path: path.join(out, '5_log.png'), fullPage: true });
   await page.click('#adminBtn');
   await page.fill('#adminKey', 'change-me');
@@ -96,10 +99,19 @@ const server = http.createServer((req, res) => {
   await page.click('nav button[data-tab=play]');
   await page.click('button.b1[data-id=P05]');
   await page.click('button.b2[data-id=P07]');
+  await page.click('#nextStep'); // 画面2へ
   if (!(await page.textContent('#main')).includes('個人戦なので')) throw new Error('個人戦の表示がない');
+  if (await page.$('#noOrder')) throw new Error('個人戦に「投擲順を入れない」が出ている');
   await page.screenshot({ path: path.join(out, '7a_start_solo.png'), fullPage: true });
+  await page.click('#backStep');
   await page.click('button.b1[data-id=P06]');
-  await page.check('#useOrder');
+  await page.click('#nextStep');
+  if (!(await page.isDisabled('#startBtn'))) throw new Error('先攻を選ぶ前に試合開始が押せる');
+  if (!(await page.$('.olist'))) throw new Error('投擲順が最初から出ていない');
+  await page.check('#noOrder');
+  if (await page.$('.olist')) throw new Error('入れないにしても投擲順が消えない');
+  await page.uncheck('#noOrder');
+  await page.click('[data-opt=first_team][data-v="1"]');
   await page.click('[data-up=P06]'); // 大西と加藤の順番を入れ替え
   await page.screenshot({ path: path.join(out, '7_start_throws.png'), fullPage: true });
   slow = 1500;
