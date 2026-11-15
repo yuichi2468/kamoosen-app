@@ -71,6 +71,24 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .heroproj { font-size: 13px; margin-top: 2px; }
 .heroproj b { color: var(--win); }
 .ba { font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.4; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.ba span { margin-right: 10px; white-space: nowrap; }
+.hm { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+.hm.void { opacity: .6; }
+.hmhead { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.hmhead .badge { font-size: 11px; padding: 1px 6px; }
+.hmhead .sclink { margin-left: auto; }
+.hmrow { display: grid; grid-template-columns: 1fr 2em 3.4em; align-items: baseline; gap: 0 6px; padding: 4px 0; }
+.hmrow + .hmrow { border-top: 1px dashed var(--line); }
+.hmrow .ba { grid-column: 1 / -1; padding-left: 1.9em; margin-top: 0; }
+.hmname { font-size: 15px; }
+.hmrow.t1 .hmname { color: var(--t1); } .hmrow.t2 .hmname { color: var(--t2); }
+.hmrow.win .hmname { font-weight: 700; }
+.hmwin { display: inline-block; width: 1.5em; margin-right: .4em; text-align: center; font-size: 11px; border-radius: 4px; }
+b.hmwin { background: var(--win); color: #fff; }
+.hmlegs { text-align: center; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hmdelta { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hmdelta.up { color: var(--win); } .hmdelta.down { color: var(--lose); }
+.hmsets { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
 .sclink { font-size: 13px; white-space: nowrap; margin-left: 6px; }
 .sctabs { display: flex; gap: 6px; margin: 10px 0 6px; flex-wrap: wrap; }
 .sctabs button { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 13px; }
@@ -149,8 +167,10 @@ button.teambox:active { filter: brightness(.95); }
 .tbname { font-size: 15px; padding: 2px 0; }
 .tbname .muted { font-size: 12px; }
 .tbempty { color: var(--muted); font-size: 14px; padding: 14px 0; text-align: center; }
-.tplist { display: flex; flex-direction: column; gap: 6px; padding-bottom: 76px; }
-.tprow { display: grid; grid-template-columns: 2.2em 1fr auto; align-items: center; gap: 6px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px; background: var(--card); color: var(--ink); font: inherit; font-size: 16px; cursor: pointer; }
+.tplist { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding-bottom: 76px; }
+.tprow { display: grid; grid-template-columns: 1.5em 1fr auto; align-items: center; gap: 2px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; background: var(--card); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; min-height: 40px; }
+.tprow .muted { font-size: 11px; }
+.tpname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tprow.on { border-width: 2px; font-weight: 700; }
 .tprow.on.t1 { border-color: var(--t1); background: color-mix(in srgb, var(--t1) 12%, var(--card)); }
 .tprow.on.t2 { border-color: var(--t2); background: color-mix(in srgb, var(--t2) 12%, var(--card)); }
@@ -874,7 +894,20 @@ function rateBA(m, ids) {
     if (!x) return '';
     return nm + (x.rating - x.delta) + ' → ' + x.rating;
   }).filter(Boolean);
-  return lines.length ? '<div class="ba">' + lines.join('<br>') + '</div>' : '';
+  return lines.length ? '<div class="ba">' + lines.map(function (x) { return '<span>' + x + '</span>'; }).join('') + '</div>' : '';
+}
+// 対戦履歴の1試合（チームごとに1行: 名前・取ったセット数・増減、その下に変動前後）
+function histCard(m, inScreen) {
+  var w = m.winner, isVoid = m.status === 'void', solo = m.team1.length === 1 && m.team2.length === 1;
+  var row = function (t) {
+    var ids = t === 1 ? m.team1 : m.team2, d = t === 1 ? m.delta1 : m.delta2, legs = t === 1 ? m.legs1 : m.legs2;
+    return '<div class="hmrow t' + t + (w === t && !isVoid ? ' win' : '') + '"><span class="hmname">' + (w === t && !isVoid ? '<b class="hmwin">勝</b>' : '<span class="hmwin"></span>') + names(ids) + '</span>' +
+      '<span class="hmlegs">' + (isVoid ? '' : legs) + '</span><span class="hmdelta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '') + '">' + (isVoid ? '' : sgn(d)) + '</span>' + rateBA(m, ids) + '</div>';
+  };
+  var sets = m.leg_scores && m.status === 'done' ? m.leg_scores.map(function (x) { return x[0] + '-' + x[1]; }).join(' / ') : (m.score1 !== '' && m.score1 !== null && m.score1 !== undefined ? '得点 ' + m.score1 + '-' + m.score2 : '');
+  return '<div class="hm' + (isVoid ? ' void' : '') + '"><div class="hmhead"><span>' + fmt(m.started_at) + '</span><span class="badge">' + (solo ? '個人戦' : 'チーム戦') + '</span>' + (isVoid ? '<span class="badge warn">無効</span>' : '') +
+    (!inScreen && m.scoring === 'throws' && m.status === 'done' ? '<a href="#" class="sclink" data-sct="' + esc(m.id) + '">スコア表 ›</a>' : '') + '</div>' +
+    row(1) + row(2) + (sets ? '<div class="hmsets">' + (m.leg_scores ? 'セット ' : '') + sets + '</div>' : '') + (m.note ? '<div class="hmsets">' + esc(m.note) + '</div>' : '') + '</div>';
 }
 function histScore(m) {
   if (m.scoring !== 'throws' || m.status !== 'done') return '';
@@ -887,9 +920,7 @@ function viewScoreScreen() {
   var back = '<button class="btn small ghost" data-scback>‹ 戻る</button>';
   var h = '<div class="card">' + back;
   if (!m) return h + '<p class="muted">試合が見つかりません</p></div>';
-  var w = m.winner;
-  h += '<div class="muted" style="margin-top:10px">' + fmt(m.started_at) + '</div>' +
-    '<div class="match" style="border:0;padding:4px 0"><div class="vs"><div class="side t1">' + (w === 1 ? '◎ ' : '') + names(m.team1) + '<br>' + sgn(m.delta1) + rateBA(m, m.team1) + '</div><div class="muted">' + m.legs1 + '-' + m.legs2 + '</div><div class="side t2">' + (w === 2 ? '◎ ' : '') + names(m.team2) + '<br>' + sgn(m.delta2) + rateBA(m, m.team2) + '</div></div></div>';
+  h += '<div style="margin-top:10px">' + histCard(m, true) + '</div>';
   if (x.loading || (!x.data && !x.error)) h += '<p class="muted">読み込み中…</p>';
   else if (x.error) h += '<p class="muted">' + esc(x.error) + '</p>';
   else {
@@ -915,10 +946,7 @@ function viewLog() {
   var h = '<div class="card"><h2>対戦履歴</h2>';
   var list = S.matches.filter(function (m) { return m.status === 'done' || m.status === 'void'; });
   if (!list.length) h += '<p class="muted">まだ試合がありません</p>';
-  list.slice(0, 200).forEach(function (m) {
-    var w = m.winner;
-    h += '<div class="match"><div class="vs"><div class="side t1">' + (w === 1 ? '◎ ' : '') + names(m.team1) + '<br>' + sgn(m.delta1) + rateBA(m, m.team1) + '</div><div class="muted">' + (m.status === 'void' ? '無効' : m.legs1 + '-' + m.legs2) + '</div><div class="side t2">' + (w === 2 ? '◎ ' : '') + names(m.team2) + '<br>' + sgn(m.delta2) + rateBA(m, m.team2) + '</div></div><div class="meta">' + fmt(m.started_at) + (m.leg_scores && m.status === 'done' ? '　' + m.leg_scores.map(function (x, i) { return (i + 1) + 'セット目 ' + x[0] + '-' + x[1]; }).join(' / ') : (m.score1 !== '' && m.score1 !== null && m.score1 !== undefined ? '　得点 ' + m.score1 + '-' + m.score2 : '')) + (m.note ? '　' + esc(m.note) : '') + '</div>' + histScore(m) + '</div>';
-  });
+  list.slice(0, 200).forEach(function (m) { h += histCard(m); });
   return h + '</div>';
 }
 
