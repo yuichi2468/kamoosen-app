@@ -4,3 +4,5 @@
 test/shots/
 node_modules/
 .clasprc.json
+.clasp.json
+build/
