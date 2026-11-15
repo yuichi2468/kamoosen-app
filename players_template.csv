@@ -1,0 +1,4 @@
+player_id,name,initial_rating,fixed_rating,active,rookie
+A,前回王者の名前,,1800,TRUE,
+P01,選手1,,,TRUE,
+P02,選手2,1525,,TRUE,

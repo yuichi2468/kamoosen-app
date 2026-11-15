@@ -1,0 +1,6 @@
+# GASエディタ貼り付け用のコピー（中身はCode.gs / index.htmlと同じ）
+*.txt
+# テストで自動生成されるスクリーンショット
+test/shots/
+node_modules/
+.clasprc.json
