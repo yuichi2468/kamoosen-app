@@ -256,6 +256,8 @@ const server = http.createServer((req, res) => {
   if (!rk.some(r => r[3] === '+30')) throw new Error('ボーナス+30が無い'); if (rk.some(r => r.join().includes('見込み'))) throw new Error('見込みが残っている');
   await page.screenshot({ path: path.join(out, '17_rank_proj.png'), fullPage: true });
   await page.click('nav button[data-tab=log]');
+  await page.setViewportSize({ width: 375, height: 667 }); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(3500); await page.screenshot({ path: path.join(out, '5c_log_sets_375.png') }); await page.setViewportSize({ width: 390, height: 844 });
+  if (!(await page.$('.hmsetsc'))) throw new Error('セット得点が中央に無い');
   await page.click('[data-sct]');
   await page.waitForSelector('.sctitle');
   const htitles = await page.$$eval('.sctitle', x => x.map(y => y.textContent));
