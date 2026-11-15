@@ -76,6 +76,18 @@
 
 コードを直したときは **デプロイ > デプロイを管理 > 編集（鉛筆）> バージョン: 新バージョン** で更新すると、URL を変えずに反映できます。
 
+### 注意書きの出ない画面（GitHub Pages）で配る
+
+GAS の URL で開くと、画面の上に「このアプリケーションは Google Apps Script のユーザーによって作成されたものです」と毎回表示されます。これを出さないため、画面（index.html）は GitHub Pages から配り、GAS はデータのやり取りだけに使えます。main に変更が入るたびに、GitHub Actions がテスト → GAS に反映 → 画面を GitHub Pages に公開、まで自動で行います（GAS の URL は画面の中に自動で書き込まれます）。
+
+最初に一度だけ、GitHub で次の設定をします。
+
+1. 無料プランの場合、GitHub Pages はリポジトリが公開（Public）でないと使えません。**Settings > General > 一番下の Danger Zone > Change visibility** で Public にします（運営パスワード `admin_key` はスプレッドシート側にあるので、公開しても漏れません）。
+2. **Settings > Pages > Build and deployment > Source** を **GitHub Actions** にします。
+3. **Actions** 画面の「GASへ反映・画面を公開」を開き、「Run workflow」で一度実行します。終わると `https://<GitHubのユーザー名>.github.io/<リポジトリ名>/` で画面が開けます。この URL を参加者に配ります。
+
+GitHub Actions の Secrets に `GAS_DEPLOYMENT_ID` が入っていることが前提です（画面がこの ID からデータの取得先を決めます）。古い GAS の URL もそのまま使えますが、試合中の記録はスマホの中に URL ごとに保存されるので、切り替えは試合をしていないときにしてください。
+
 ## 4. 当日の使い方
 
 **参加者**

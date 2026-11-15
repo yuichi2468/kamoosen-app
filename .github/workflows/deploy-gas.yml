@@ -1,5 +1,5 @@
 # main に変更が入ったら、テストを通してから Google Apps Script に自動で反映する
-name: GASへ反映
+name: GASへ反映・画面を公開
 
 on:
   push:
@@ -61,3 +61,41 @@ jobs:
           fi
           DESC="$(git log -1 --format='%h %s' | cut -c1-90)"
           clasp deploy --deploymentId "$GAS_DEPLOYMENT_ID" --description "$DESC"
+
+  # 画面（index.html）を GitHub Pages で公開する。
+  # GAS の画面だと上に「Google Apps Script のユーザーによって作成…」の注意書きが出るため、
+  # 画面は GitHub Pages から配り、GAS はデータのやり取り（API）だけに使う。
+  pages:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 公開する画面を作る（GAS の URL を書き込む）
+        env:
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+        run: |
+          if [ -z "$GAS_DEPLOYMENT_ID" ]; then
+            echo "::error::GAS_DEPLOYMENT_ID が未設定なので、画面がデータの取得先を知ることができません"
+            exit 1
+          fi
+          mkdir -p site
+          API="https://script.google.com/macros/s/${GAS_DEPLOYMENT_ID}/exec"
+          sed "s#^var API_URL = '';#var API_URL = '${API}';#" index.html > site/index.html
+          grep -q "^var API_URL = 'https://script.google.com/" site/index.html || { echo "::error::index.html の API_URL 行が見つかりません"; exit 1; }
+          touch site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: GitHub Pages に公開
+        id: deployment
+        uses: actions/deploy-pages@v4
