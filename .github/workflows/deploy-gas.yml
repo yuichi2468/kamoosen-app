@@ -1,0 +1,63 @@
+# main に変更が入ったら、テストを通してから Google Apps Script に自動で反映する
+name: GASへ反映
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # GitHub の「Actions」画面から手動でも実行できる
+
+concurrency:
+  group: deploy-gas
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: テスト
+        run: node test/test.js
+
+      - name: 設定の確認
+        id: check
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ] || [ -z "$GAS_SCRIPT_ID" ]; then
+            echo "::warning::CLASPRC_JSON / GAS_SCRIPT_ID が未設定なので、GASへの反映はスキップしました"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apps Script に反映（clasp push）
+        if: steps.check.outputs.ready == 'true'
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+        run: |
+          npm install -g @google/clasp@2.4.2
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          # GAS に送るのはこの3つだけ（テストや設計書は送らない）
+          mkdir -p build
+          cp Code.gs index.html appsscript.json build/
+          printf '{"scriptId":"%s","rootDir":"build"}' "$GAS_SCRIPT_ID" > .clasp.json
+          clasp push --force
+
+      - name: Webアプリを新バージョンに更新（URLはそのまま）
+        if: steps.check.outputs.ready == 'true'
+        env:
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+        run: |
+          if [ -z "$GAS_DEPLOYMENT_ID" ]; then
+            echo "::warning::GAS_DEPLOYMENT_ID が未設定なので、コードの反映だけ行いました（公開URLの更新は手動）"
+            exit 0
+          fi
+          DESC="$(git log -1 --format='%h %s' | cut -c1-90)"
+          clasp deploy --deploymentId "$GAS_DEPLOYMENT_ID" --description "$DESC"
