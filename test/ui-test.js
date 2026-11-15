@@ -59,7 +59,7 @@ const server = http.createServer((req, res) => {
     await page.click('[data-teampick="' + t + '"]');
     await page.waitForSelector('.tplist');
     for (const id of ids) await page.click('[data-tp="' + id + '"]');
-    if (shot) await page.screenshot({ path: path.join(out, shot), fullPage: false });
+    if (shot) { await page.setViewportSize({ width: 375, height: 667 }); await page.screenshot({ path: path.join(out, shot) }); await page.setViewportSize({ width: 390, height: 844 }); }
     await page.click('#tpOk');
     await page.waitForSelector('[data-teampick]');
   };
@@ -101,10 +101,13 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('svg.chart');
   await page.screenshot({ path: path.join(out, '4_me.png'), fullPage: true });
   await page.click('nav button[data-tab=log]');
-  const ba = await page.$$eval('.match .ba', x => x.map(y => y.innerText.replace(/\n/g, ' / ')));
+  const ba = await page.$$eval('.hm .ba', x => x.map(y => [...y.children].map(c => c.textContent).join(' / ')));
   console.log('history before/after:', JSON.stringify(ba.slice(0, 4)));
   if (!ba.some(x => /1800（固定）/.test(x)) || !ba.some(x => /^\d+ → \d+$/.test(x))) throw new Error('変動前後のレートが出ていない');
   await page.screenshot({ path: path.join(out, '5_log.png'), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.screenshot({ path: path.join(out, '5b_log_375.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.click('#adminBtn');
   await page.fill('#adminKey', 'change-me');
   await page.click('#adminLogin');
