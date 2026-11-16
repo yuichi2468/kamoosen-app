@@ -293,7 +293,7 @@ const server = http.createServer((req, res) => {
     await page.click('[data-score="' + cmid + '"]');
     await page.waitForSelector('.points');
     await page.click('[data-pt="5"]'); await page.click('#okThrow');
-    if ((await page.textContent('#okThrow')).trim() !== '確定') throw new Error('点数未選択の確定の表示がおかしい');
+    if ((await page.textContent('#okThrow')).trim() !== '確定（ミス）') throw new Error('点数未選択の確定の表示がおかしい');
     await page.click('.cancelrow [data-cancel]');
     await page.waitForSelector('.cancelov');
     await page.screenshot({ path: path.join(out, '20_scoring_cancel.png') });
