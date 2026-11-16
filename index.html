@@ -240,6 +240,7 @@ svg.chart { width: 100%; height: auto; display: block; }
 .keys .btn { width: 100%; text-align: center; }
 .keys .wide { grid-column: span 2; padding: 14px; font-size: 17px; }
 .keys.throwkeys { grid-template-columns: 1fr 2fr; }
+.keys .btn.nopt { background: var(--muted); border-color: var(--muted); color: #fff; } /* 点数を選ぶ前（押すとミス） */
 .cancelov { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .cancelbox { background: var(--card); color: var(--ink); border-radius: 14px; padding: 20px 18px; width: 100%; max-width: 340px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
 .cancelbox h3 { margin: 0 0 8px; font-size: 18px; }
@@ -852,7 +853,7 @@ function viewScoring() {
     }).join('') + '</div>';
     // 点数を選ばずに「確定」を押すとミス（0点）
     h += '<div class="keys throwkeys"><button class="btn ghost" id="undoThrow"' + (loc.throws.length || st.leg > 1 ? '' : ' disabled') + '>1投戻す</button>' +
-      '<button class="btn" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定') + '</button></div>';
+      '<button class="btn' + (loc.selPt ? '' : ' nopt') + '" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定') + '</button></div>';
   }
   if (st.log.length && st.finished) {
     h += scoreTablesAll(st, m);
