@@ -44,10 +44,16 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .arank { display: inline-block; min-width: 3.2em; font-size: 13px; color: var(--muted); }
 .arank.r1 { color: #b07a00; font-weight: 700; }
 .arow.prov .arank, .arow.prov .aval { opacity: .75; }
-.amore summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 3px 0; list-style: none; }
+.amore summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 2px; padding: 5px 12px; font-size: 13px; font-weight: 600; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; background: var(--card); list-style: none; user-select: none; }
+.amore summary:active { opacity: .7; }
 .amore summary::-webkit-details-marker { display: none; }
-.amore summary::before { content: '▸ '; }
-.amore[open] summary::before { content: '▾ '; }
+.amore summary::after { content: ''; width: 6px; height: 6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.amore[open] summary::after { transform: translateY(2px) rotate(-135deg); }
+.amore[open] summary { margin-bottom: 4px; }
+.amore .when-open, .amore[open] .when-closed { display: none; }
+.amore[open] .when-open { display: inline; }
+.cancelrow { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line); text-align: center; }
+.cancelrow p { margin: 4px 0 0; font-size: 12px; }
 .aval { margin-left: auto; font-variant-numeric: tabular-nums; }
 .adet { flex-basis: 100%; font-size: 12px; padding-left: 3.6em; }
 .badge.award-b { background: #fff1c9; color: #6b4a00; margin: 2px 4px 2px 0; font-size: 12px; padding: 2px 8px; border: 1px solid transparent; }
@@ -532,7 +538,7 @@ function viewAwards() {
     if (!top.length) top = a.entries.filter(function (e) { return e.rank === 1; });
     var rest = a.entries.filter(function (e) { return top.indexOf(e) < 0; });
     h += top.map(row).join('');
-    if (rest.length) h += '<details class="amore" data-sec="aw_' + esc(a.key) + '"' + (secOpen('aw_' + a.key) ? ' open' : '') + '><summary>2位以降を見る（' + rest.length + '人）</summary>' + rest.map(row).join('') + '</details>';
+    if (rest.length) h += '<details class="amore" data-sec="aw_' + esc(a.key) + '"' + (secOpen('aw_' + a.key) ? ' open' : '') + '><summary><span class="when-closed">2位以降を見る（' + rest.length + '人）</span><span class="when-open">閉じる</span></summary>' + rest.map(row).join('') + '</details>';
     h += '</div>';
   });
   var M = A.memorial;
@@ -644,10 +650,16 @@ function viewStartStep2() {
   return h + '</div>';
 }
 
+// 開始の取り消し（2回押しで確定）。cancelArm に構えた試合を覚えておき、描き直しても状態が消えないようにする
+var cancelArm = null, cancelArmTimer = null;
+function cancelBtn(m) {
+  var armed = cancelArm === m.id;
+  return '<button class="btn small danger" data-cancel="' + esc(m.id) + '">' + (armed ? 'もう一度押すと取り消し' : m.scoring === 'throws' ? 'この試合を取り消す' : '開始を取り消す') + '</button>';
+}
 function manualForm(m) {
   return '<div class="res"><div><label>チーム1 セット数</label><select data-f="legs1"><option></option><option>0</option><option>1</option><option>2</option></select> <label>得点合計（任意）</label><input type="number" data-f="score1" min="0"></div>' +
        '<div><label>チーム2 セット数</label><select data-f="legs2"><option></option><option>0</option><option>1</option><option>2</option></select> <label>得点合計（任意）</label><input type="number" data-f="score2" min="0"></div></div>' +
-       '<div class="row" style="margin-top:8px"><button class="btn small" data-result="' + esc(m.id) + '">結果を確定</button><button class="btn small danger" data-cancel="' + esc(m.id) + '">開始を取り消す</button></div>';
+       '<div class="row" style="margin-top:8px"><button class="btn small" data-result="' + esc(m.id) + '">結果を確定</button>' + cancelBtn(m) + '</div>';
 }
 
 function findM(mid) { return S.matches.filter(function (x) { return x.id === mid; })[0]; }
@@ -671,7 +683,7 @@ function matchCard(m) {
     h += liveLine(m);
     var mineDev = m.scorer === '端末' + deviceId();
     h += '<div class="row" style="margin-top:8px"><button class="btn small" data-score="' + esc(m.id) + '">' + (mineDev || !m.scorer ? 'スコア入力を開く' : 'この端末で記録を引き継ぐ') + '</button>' +
-      '</div><p class="muted" style="margin:6px 0 0"><a href="#" data-manual="' + esc(m.id) + '" style="color:var(--muted);font-weight:400">予備: 結果だけ入力に切り替える</a></p>';
+      (manualOpen[m.id] ? '' : cancelBtn(m)) + '</div><p class="muted" style="margin:6px 0 0"><a href="#" data-manual="' + esc(m.id) + '" style="color:var(--muted);font-weight:400">予備: 結果だけ入力に切り替える</a></p>';
     if (!mineDev && m.scorer) h += '<div class="muted" style="margin-top:4px">ほかの端末で記録中です。引き継ぐと、この端末から記録を続けられます。</div>';
     if (manualOpen[m.id]) h += manualForm(m);
   } else {
@@ -720,7 +732,9 @@ function doSync() {
   var ver = loc.ver;
   call('sync', { match_id: mid, throws: loc.throws, leg3_first: loc.leg3_first, leg_orders: loc.leg_orders, base_rev: loc.base_rev, takeover: !!loc.takeover, device: deviceId() })
     .then(function (data) {
-      syncing = false; S = data;
+      syncing = false;
+      if (!LC[mid]) return; // 送信中に試合が取り消された
+      S = data;
       var m = findM(mid);
       loc.sentVer = ver; loc.base_rev = m ? m.rev : loc.base_rev; loc.takeover = false;
       if (m && m.status === 'done') { lcDrop(mid); if (scoringId === mid) scoringId = null; toast('試合終了。結果を記録しました'); }
@@ -730,6 +744,7 @@ function doSync() {
     })
     .catch(function (e) {
       syncing = false;
+      if (!LC[mid]) return; // 送信中に試合が取り消された
       var msg = e.message || String(e);
       if (/^(SCORER|REV):/.test(msg)) { loc.conflict = msg.replace(/^(SCORER|REV):/, ''); lcSave(mid); render(); }
       else if (/通信|fetch|network|Failed|timeout/i.test(msg)) { render(); setTimeout(function () { queueSync(); }, 5000); }
@@ -837,6 +852,7 @@ function viewScoring() {
     }).join('') + '</div>';
     h += '<div class="sctwrap live">' + scoreTable(st, m, selLeg, true) + '</div>' + scoreLegend();
   }
+  if (!loc.confirmEnd) h += '<div class="cancelrow">' + cancelBtn(m) + '<p class="muted">試合をなかったことにします（記録もレートも残りません）</p></div>';
   return h + '</div>';
 }
 
@@ -1178,7 +1194,17 @@ document.getElementById('main').addEventListener('click', function (e) {
     act('result', { match_id: d.result, team1_legs: v('legs1'), team2_legs: v('legs2'), team1_score: v('score1'), team2_score: v('score2') }, '結果を記録しました').then(function () { t.disabled = false; manualSending--; render(); });
     return;
   }
-  if (d.cancel) { if (t.dataset.sure) { act('cancel', { match_id: d.cancel }, '取り消しました'); } else { t.dataset.sure = 1; t.textContent = 'もう一度押すと取り消し'; } return; }
+  if (d.cancel) {
+    var cid = d.cancel;
+    clearTimeout(cancelArmTimer);
+    if (cancelArm !== cid) { cancelArm = cid; cancelArmTimer = setTimeout(function () { cancelArm = null; render(); }, 5000); render(); return; }
+    cancelArm = null; t.disabled = true;
+    if (scoringId === cid) clearTimeout(syncTimer);
+    call('cancel', { match_id: cid, device: deviceId() }).then(function (data) {
+      S = data; lcDrop(cid); delete manualOpen[cid]; if (scoringId === cid) scoringId = null; render(); toast('試合を取り消しました');
+    }).catch(function (e) { render(); toast(e.message || String(e), true); });
+    return;
+  }
   if (t.id === 'adminLogin') { var k = document.getElementById('adminKey').value; call('adminCheck', { admin_key: k }).then(function () { adminKey = k; render(); }).catch(function (er) { toast(er.message || er, true); }); return; }
   if (t.id === 'adminRecalc') { act('adminRecalc', { admin_key: adminKey }, '再計算しました'); return; }
   if (d.void) { if (t.dataset.sure) act('adminVoid', { admin_key: adminKey, match_id: d.void, note: '運営が無効化' }, '無効にしました'); else { t.dataset.sure = 1; t.textContent = 'もう一度押すと無効'; } return; }
