@@ -239,6 +239,14 @@ svg.chart { width: 100%; height: auto; display: block; }
 .keys { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .keys .btn { width: 100%; text-align: center; }
 .keys .wide { grid-column: span 2; padding: 14px; font-size: 17px; }
+.keys .btn.missok { background: transparent; border-color: var(--lose); color: var(--lose); }
+.cancelov { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.cancelbox { background: var(--card); color: var(--ink); border-radius: 14px; padding: 20px 18px; width: 100%; max-width: 340px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.cancelbox h3 { margin: 0 0 8px; font-size: 18px; }
+.cancelbox .warn { color: var(--lose); font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+.cancelbox p { margin: 0 0 14px; font-size: 13px; }
+.cancelbox .btn { display: block; width: 100%; margin-top: 8px; padding: 13px; font-size: 16px; }
+.cancelbox .btn.go { background: var(--lose); border-color: var(--lose); color: #fff; }
 .olist { list-style: none; padding: 0; margin: 6px 0 0; }
 .olist li { display: flex; justify-content: space-between; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .firstpick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 12px; }
@@ -650,11 +658,15 @@ function viewStartStep2() {
   return h + '</div>';
 }
 
-// 開始の取り消し（2回押しで確定）。cancelArm に構えた試合を覚えておき、描き直しても状態が消えないようにする
-var cancelArm = null, cancelArmTimer = null;
+// 開始の取り消し。1回目で画面中央に注意を出し、そこでもう一度押すと取り消す。
+// cancelArm に構えた試合を覚えておき、描き直しても表示が消えないようにする
+var cancelArm = null;
 function cancelBtn(m) {
-  var armed = cancelArm === m.id;
-  return '<button class="btn small danger" data-cancel="' + esc(m.id) + '">' + (armed ? 'もう一度押すと取り消し' : m.scoring === 'throws' ? 'この試合を取り消す' : '開始を取り消す') + '</button>';
+  var h = '<button class="btn small danger" data-cancel="' + esc(m.id) + '">' + (m.scoring === 'throws' ? 'この試合を取り消す' : '開始を取り消す') + '</button>';
+  if (cancelArm === m.id) h += '<div class="cancelov" role="dialog" aria-modal="true"><div class="cancelbox"><h3>この試合を取り消しますか？</h3>' +
+    '<div class="warn">⚠ 取り消すと元に戻せません</div><p class="muted">' + names(m.team1) + ' vs ' + names(m.team2) + '<br>記録した点数もレートの変動も残りません。</p>' +
+    '<button class="btn go" data-cancel="' + esc(m.id) + '">もう一度押すと取り消し</button><button class="btn ghost" data-cancelno="1">やめる（試合を続ける）</button></div></div>';
+  return h;
 }
 function manualForm(m) {
   return '<div class="res"><div><label>チーム1 セット数</label><select data-f="legs1"><option></option><option>0</option><option>1</option><option>2</option></select> <label>得点合計（任意）</label><input type="number" data-f="score1" min="0"></div>' +
@@ -838,9 +850,9 @@ function viewScoring() {
     h += '<div class="points">' + [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (pt) {
       return '<button data-pt="' + pt + '" class="' + (loc.selPt === pt ? 'on' : '') + '">' + pt + '</button>';
     }).join('') + '</div>';
-    h += '<div class="keys"><button class="btn wide" id="okThrow"' + (loc.selPt ? '' : ' disabled') + '>' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '点数を選んでください') + '</button>' +
-      '<button class="btn danger" id="missThrow">ミス（0点）</button>' +
-      '<button class="btn ghost" id="undoThrow"' + (loc.throws.length || st.leg > 1 ? '' : ' disabled') + '>1投戻す</button></div>';
+    // 点数を選ばずに「確定」を押すとミス（0点）
+    h += '<div class="keys"><button class="btn wide' + (loc.selPt ? '' : ' missok') + '" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定') + '</button>' +
+      '<button class="btn ghost wide" id="undoThrow"' + (loc.throws.length || st.leg > 1 ? '' : ' disabled') + '>1投戻す</button></div>';
   }
   if (st.log.length && st.finished) {
     h += scoreTablesAll(st, m);
@@ -1136,7 +1148,7 @@ function adminRow(m) {
 
 /* ---- イベント ---- */
 document.getElementById('adminBtn').addEventListener('click', function () { scoreView = null; tab = 'admin'; render(); window.scrollTo(0, 0); });
-document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; tab = b.dataset.tab; render(); } });
+document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; tab = b.dataset.tab; render(); } });
 document.getElementById('main').addEventListener('toggle', function (e) { var k = e.target.dataset && e.target.dataset.sec; if (k) store('kamo_sec_' + k, e.target.open ? '1' : '0'); }, true);
 document.getElementById('main').addEventListener('input', function (e) { if (e.target.id === 'meFilter') { meFilter = e.target.value; var p0 = e.target.selectionStart; render(); var f0 = document.getElementById('meFilter'); f0.focus(); f0.setSelectionRange(p0, p0); return; } if (e.target.id === 'filter') { filter = e.target.value; var pos = e.target.selectionStart; render(); var f = document.getElementById('filter'); f.focus(); f.setSelectionRange(pos, pos); } });
 document.getElementById('main').addEventListener('change', function (e) { if (e.target.id === 'meView') { meView = e.target.value; meAllMatches = false; store('kamo_view', meView); render(); } });
@@ -1146,7 +1158,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#missThrow,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
@@ -1161,8 +1173,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (d.score) { openScoring(d.score); return; }
   if (d.manual) { manualOpen[d.manual] = !manualOpen[d.manual]; render(); return; }
   if (d.pt) { var lp = LC[scoringId], v = Number(d.pt); lp.selPt = lp.selPt === v ? null : v; render(); return; }
-  if (t.id === 'okThrow') { var lo = LC[scoringId]; if (lo.selPt) addThrow('normal', lo.selPt); return; }
-  if (t.id === 'missThrow') { addThrow('miss'); return; }
+  if (t.id === 'okThrow') { var lo = LC[scoringId]; if (lo.selPt) addThrow('normal', lo.selPt); else addThrow('miss'); return; }
   if (t.id === 'undoThrow') { undoThrow(); return; }
   if (t.id === 'confirmEnd') { LC[scoringId].confirmEnd = true; LC[scoringId].ver++; lcSave(scoringId); queueSync(true); render(); return; }
   if (d.dfirst) { LC[scoringId].draft.first = Number(d.dfirst); render(); return; }
@@ -1194,10 +1205,10 @@ document.getElementById('main').addEventListener('click', function (e) {
     act('result', { match_id: d.result, team1_legs: v('legs1'), team2_legs: v('legs2'), team1_score: v('score1'), team2_score: v('score2') }, '結果を記録しました').then(function () { t.disabled = false; manualSending--; render(); });
     return;
   }
+  if (d.cancelno || (t.classList.contains('cancelov') && e.target === t)) { cancelArm = null; render(); return; }
   if (d.cancel) {
     var cid = d.cancel;
-    clearTimeout(cancelArmTimer);
-    if (cancelArm !== cid) { cancelArm = cid; cancelArmTimer = setTimeout(function () { cancelArm = null; render(); }, 5000); render(); return; }
+    if (cancelArm !== cid) { cancelArm = cid; render(); return; }
     cancelArm = null; t.disabled = true;
     if (scoringId === cid) clearTimeout(syncTimer);
     call('cancel', { match_id: cid, device: deviceId() }).then(function (data) {

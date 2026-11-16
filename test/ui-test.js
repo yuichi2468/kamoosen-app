@@ -146,7 +146,7 @@ const server = http.createServer((req, res) => {
   if (!(await page.isHidden('#sendNotice'))) throw new Error('開始後も注意が消えていない');
   slow = 0;
   const throwPins = async (pt) => { await page.click('[data-pt="' + pt + '"]'); await page.click('#okThrow'); };
-  const miss = () => page.click('#missThrow');
+  const miss = () => page.click('#okThrow'); // 点数を選ばずに確定 = ミス
   // 1本目: チーム1（加藤→大西）が 12,12,12,12,2 で 50。チーム2（木村）は 1 ずつ
   await throwPins(12); await throwPins(1); await throwPins(12); await throwPins(1);
   await throwPins(3); await miss();                // 3点、ミス
@@ -293,11 +293,16 @@ const server = http.createServer((req, res) => {
     await page.click('[data-score="' + cmid + '"]');
     await page.waitForSelector('.points');
     await page.click('[data-pt="5"]'); await page.click('#okThrow');
+    if ((await page.textContent('#okThrow')).trim() !== '確定') throw new Error('点数未選択の確定の表示がおかしい');
     await page.click('.cancelrow [data-cancel]');
-    const armed = await page.textContent('.cancelrow [data-cancel]');
-    await page.screenshot({ path: path.join(out, '20_scoring_cancel.png'), fullPage: true });
+    await page.waitForSelector('.cancelov');
+    await page.screenshot({ path: path.join(out, '20_scoring_cancel.png') });
+    await page.click('[data-cancelno]');   // やめる → 試合は続く
+    if (await page.$('.cancelov')) throw new Error('やめるで閉じない');
+    await page.click('.cancelrow [data-cancel]');
+    const armed = await page.textContent('.cancelov [data-cancel]');
     if (!/もう一度/.test(armed)) throw new Error('取り消しの確認が出ない: ' + armed);
-    await page.click('.cancelrow [data-cancel]');
+    await page.click('.cancelov [data-cancel]');
     await page.waitForSelector('.points', { state: 'detached' });
     await page.waitForTimeout(300);
     const cm = g.api('state').data.matches.find(m => m.id === cmid);
