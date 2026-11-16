@@ -853,7 +853,7 @@ function viewScoring() {
     }).join('') + '</div>';
     // 点数を選ばずに「確定」を押すとミス（0点）
     h += '<div class="keys throwkeys"><button class="btn ghost" id="undoThrow"' + (loc.throws.length || st.leg > 1 ? '' : ' disabled') + '>1投戻す</button>' +
-      '<button class="btn' + (loc.selPt ? '' : ' nopt') + '" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定') + '</button></div>';
+      '<button class="btn' + (loc.selPt ? '' : ' nopt') + '" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定（ミス）') + '</button></div>';
   }
   if (st.log.length && st.finished) {
     h += scoreTablesAll(st, m);
