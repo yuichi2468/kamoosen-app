@@ -851,7 +851,7 @@ function viewScoring() {
       return '<button data-pt="' + pt + '" class="' + (loc.selPt === pt ? 'on' : '') + '">' + pt + '</button>';
     }).join('') + '</div>';
     // 点数を選ばずに「確定」を押すとミス（0点）
-    h += '<div class="keys"><button class="btn wide' + (loc.selPt ? '' : ' missok') + '" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定（ミス・0点）') + '</button>' +
+    h += '<div class="keys"><button class="btn wide' + (loc.selPt ? '' : ' missok') + '" id="okThrow">' + (loc.selPt ? '確定（' + loc.selPt + '点）' : '確定') + '</button>' +
       '<button class="btn ghost wide" id="undoThrow"' + (loc.throws.length || st.leg > 1 ? '' : ' disabled') + '>1投戻す</button></div>';
   }
   if (st.log.length && st.finished) {
