@@ -284,6 +284,27 @@ const server = http.createServer((req, res) => {
   const p4 = st.players.find(p => p.id === 'P04');
   console.log('preview:', preview.replace(/\s+/g, ' '));
   console.log('P04 rating after win vs A team:', p4.rating, 'A:', st.players.find(p => p.id === 'A').rating);
+  // 1投ごとの記録で始めた試合を途中で取り消す
+  {
+    let r = g.api('start', { team1: ['P10'], team2: ['P11'], scoring: 'throws', first_team: 1, device: 'other' }); if (!r.ok) throw new Error(r.error);
+    const cmid = r.data.matches.find(m => m.status === 'playing' && m.team1[0] === 'P10').id;
+    await page.reload(); await page.waitForSelector('table');
+    await page.click('nav button[data-tab=play]');
+    await page.click('[data-score="' + cmid + '"]');
+    await page.waitForSelector('.points');
+    await page.click('[data-pt="5"]'); await page.click('#okThrow');
+    await page.click('.cancelrow [data-cancel]');
+    const armed = await page.textContent('.cancelrow [data-cancel]');
+    await page.screenshot({ path: path.join(out, '20_scoring_cancel.png'), fullPage: true });
+    if (!/もう一度/.test(armed)) throw new Error('取り消しの確認が出ない: ' + armed);
+    await page.click('.cancelrow [data-cancel]');
+    await page.waitForSelector('.points', { state: 'detached' });
+    await page.waitForTimeout(300);
+    const cm = g.api('state').data.matches.find(m => m.id === cmid);
+    console.log('canceled match status:', cm.status, cm.note);
+    if (cm.status !== 'void') throw new Error('試合が取り消されていない');
+    await page.screenshot({ path: path.join(out, '21_after_cancel.png'), fullPage: true });
+  }
   console.log('page errors:', errors.length ? errors : 'none');
   await browser.close(); server.close();
   process.exit(errors.length ? 1 : 0);
