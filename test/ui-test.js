@@ -179,6 +179,16 @@ const server = http.createServer((req, res) => {
   // 2セット目: チーム2先攻。チーム1が3連続ミス → チーム2 の勝ち（1-1）
   await miss(); await miss(); await throwPins(1); await miss(); await throwPins(1); await miss();
   await page.waitForSelector('.firstpick');
+  {
+    // 3セット目の準備: 得点ボードは出さず、総得点が高いチームが先攻に仮選択されている
+    if (await page.$('.board')) throw new Error('3セット目の準備画面に得点ボードが出ている');
+    const tot = (await page.textContent('.nextbar')).match(/総得点\s*(\d+)\s*-\s*(\d+)/);
+    const want = +tot[1] > +tot[2] ? '1' : +tot[2] > +tot[1] ? '2' : null;
+    const on = await page.$$eval('.firstpick button.on', x => x.map(y => y.dataset.dfirst));
+    console.log('leg3 totals', tot[1], tot[2], 'preselected', on.join(','));
+    if (on.join(',') !== (want || '')) throw new Error('3セット目の先攻の初期選択がおかしい: ' + on);
+    if (want && await page.$eval('#legStart', b => b.disabled)) throw new Error('初期選択があるのに開始できない');
+  }
   await page.click('[data-dfirst="1"]');
   await page.screenshot({ path: path.join(out, '9b_leg3_setup.png'), fullPage: true });
   await page.click('#legStart');

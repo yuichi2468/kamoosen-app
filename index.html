@@ -796,7 +796,7 @@ function setupView(m, loc, st) {
   var dr = loc.draft;
   if (!dr || dr.leg !== st.leg) {
     var base = st.orders[st.leg - 1] || [m.team1.slice(), m.team2.slice()];
-    dr = loc.draft = { leg: st.leg, o: [base[0].slice(), base[1].slice()], first: st.needFirst ? null : st.legFirst };
+    dr = loc.draft = { leg: st.leg, o: [base[0].slice(), base[1].slice()], first: st.needFirst ? (st.leg3Chooser || null) : st.legFirst }; // 3セット目は総得点が高いチームを先攻に仮選択（同点は未選択）
   }
   var h = '<div class="nextbar"><b>' + st.leg + 'セット目の準備</b>';
   if (st.leg === 3) h += '<br>1-1です。2セット目までの総得点 <b>' + st.totals[0] + '</b> - <b>' + st.totals[1] + '</b><br>' + (st.leg3Chooser ? 'チーム' + st.leg3Chooser + 'が先攻・後攻を選びます' : '総得点が同じなのでドローショットで決めてください');
@@ -830,7 +830,9 @@ function viewScoring() {
   if (loc.conflict) {
     h += '<div class="warnbox">' + esc(loc.conflict) + '。<div class="row" style="margin-top:6px"><button class="btn small" id="forceMine">この端末の記録で続ける</button><button class="btn small ghost" id="reloadServer">サーバーの記録を読み込む</button></div></div>';
   }
-  h += '<div class="board">' + [1, 2].map(function (t) {
+  // セットの準備画面では得点ボード（0 - 0）は出さない
+  var setupScreen = st.needSetup && !st.error && !st.finished;
+  if (!setupScreen) h += '<div class="board">' + [1, 2].map(function (t) {
     var k = t - 1, ms = st.misses[k];
     return '<div class="tb t' + t + (st.nextTeam === t ? ' turn' : '') + '"><div class="legs">チーム' + t + '</div><div class="stars" aria-label="取ったセット ' + st.legsWon[k] + '">' + stars(st.legsWon[k]) + '</div><div class="big">' + st.scores[k] + '</div>' +
       '<div class="dots" aria-label="連続ミス' + ms + '回">' + [0, 1, 2].map(function (i) { return i < ms ? '<span class="x">✕</span>' : '<span>・</span>'; }).join('') + '</div>' +
