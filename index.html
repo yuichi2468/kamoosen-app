@@ -540,7 +540,10 @@ function render() {
   var s = S.settings;
   s.end_at_label = function () { var now = Date.now(); if (now < s.start_at) return '開始前'; if (now >= s.end_at) return '試合開始は締切済み'; var h = Math.floor((s.end_at - now) / 3600000); return '残り ' + Math.floor(h / 24) + '日' + (h % 24) + '時間'; };
   document.getElementById('period').textContent = '期間 ' + fmt(s.start_at) + ' 〜 ' + fmt(s.end_at) + '（' + s.end_at_label() + '）';
-  document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); });
+  var schOnTab = s.sched_visible !== false; // 日程タブは運営画面で非表示にできる
+  if (!schOnTab && tab === 'sched') { schLeave(); schOpen = schForm = schBulk = null; tab = 'rank'; }
+  if (!schOnTab) schCands = null;
+  document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'sched') b.hidden = !schOnTab; });
   document.getElementById('adminBtn').classList.toggle('on', tab === 'admin');
   var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched })[tab]();
   document.getElementById('main').innerHTML = html;
@@ -1216,14 +1219,18 @@ function viewAdmin() {
     return h + '<p class="muted">運営パスワードを入れてください（スプレッドシートの settings シートの admin_key）。</p><div class="row"><input type="password" id="adminKey"><button class="btn" id="adminLogin">入る</button></div></div>';
   }
   h += '<div class="row"><button class="btn" id="adminRecalc">レート再計算</button><span class="muted">シートを直接直したあとに押してください</span></div></div>';
-  var vOn = S.settings.virtual_rating_visible !== false;
+  var vOn = S.settings.virtual_rating_visible !== false, sOn = S.settings.sched_visible !== false;
   h += '<div class="card"><h2>表示の設定</h2><div class="row"><span><b>レート固定の人の参考レート</b><br><span class="muted">ほかの人と同じように変動した場合のレート（個人ページ・ランキングのレイドバトル欄）</span></span>' +
     '</div><div class="row" style="margin-top:6px">' + (vOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
     '<button class="btn small' + (vOn ? ' ghost' : '') + '" id="virtualToggle" data-on="' + (vOn ? 1 : 0) + '">' + (vOn ? '非表示にする' : '表示する') + '</button></div>' +
     '<div class="row" style="margin-top:12px"><span><b>参考レートの開始値</b><br><span class="muted">空欄なら固定レート（' + fixedRates() + '）から始めます</span></span></div>' +
     '<div class="row" style="margin-top:6px"><input type="number" id="virtualStart" inputmode="numeric" placeholder="固定" value="' + (S.settings.virtual_initial_rating === null || S.settings.virtual_initial_rating === undefined ? '' : esc(S.settings.virtual_initial_rating)) + '">' +
     '<button class="btn small" id="virtualStartSave">保存</button></div>' +
-    '<p class="muted" style="margin:6px 0 0">settings シートの virtual_rating_visible・virtual_initial_rating と同じ設定です</p></div>';
+    '<p class="muted" style="margin:6px 0 0">settings シートの virtual_rating_visible・virtual_initial_rating と同じ設定です</p>' +
+    '<div class="row" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><span><b>日程タブ</b><br><span class="muted">いつ対戦できるかを登録する時間割（非表示のあいだは参加の登録もできません。登録済みの内容は残ります）</span></span></div>' +
+    '<div class="row" style="margin-top:6px">' + (sOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
+    '<button class="btn small' + (sOn ? ' ghost' : '') + '" id="schedToggle" data-on="' + (sOn ? 1 : 0) + '">' + (sOn ? '非表示にする' : '表示する') + '</button></div>' +
+    '<p class="muted" style="margin:6px 0 0">settings シートの sched_visible と同じ設定です</p></div>';
   h += '<div class="card"><h2>すべての試合</h2>' + S.matches.slice(0, 300).map(adminRow).join('') + '</div>';
   return h;
 }
@@ -1606,7 +1613,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#virtualStartSave,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#virtualStartSave,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
@@ -1665,6 +1672,7 @@ document.getElementById('main').addEventListener('click', function (e) {
     return;
   }
   if (t.id === 'adminLogin') { var k = document.getElementById('adminKey').value; call('adminCheck', { admin_key: k }).then(function () { adminKey = k; render(); }).catch(function (er) { toast(er.message || er, true); }); return; }
+  if (t.id === 'schedToggle') { var so = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'sched_visible', value: so }, so ? '日程タブを表示します' : '日程タブを非表示にしました'); return; }
   if (t.id === 'virtualToggle') { var on = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'virtual_rating_visible', value: on }, on ? '参考レートを表示します' : '参考レートを非表示にしました'); return; }
   if (t.id === 'virtualStartSave') { var vs = document.getElementById('virtualStart').value.trim(); act('adminSetting', { admin_key: adminKey, key: 'virtual_initial_rating', value: vs }, vs === '' ? '参考レートを固定レートから始めます' : '参考レートを ' + vs + ' から始めます'); return; }
   if (t.id === 'adminRecalc') { act('adminRecalc', { admin_key: adminKey }, '再計算しました'); return; }

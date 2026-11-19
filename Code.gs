@@ -72,6 +72,7 @@ var DEFAULT_SETTINGS = [
   ['bonus_partner_tiers', '5:5,10:15,20:30,30:45,all:100', '追加ボーナス: チーム戦で組んだ人数の区分（人数:ポイント。all は全員）'],
   ['bonus_opponent_tiers', '5:5,10:15,20:35,30:55,all:100', '追加ボーナス: 個人戦で戦った相手の人数の区分（人数:ポイント。all は全員）'],
   ['bonus_rookie_pt', 30, 'ハンデボーナス: 1回生（players の rookie 列）に予選終了後に加算するレート。0 でなし'],
+  ['sched_visible', true, '日程タブをアプリに表示するか（FALSE で非表示。運営画面からも切り替えられる）'],
   ['sched_day_start', 7, '日程: 時間割の最初の時間帯（7 なら 7時台から）'],
   ['sched_day_end', 20, '日程: 時間割の最後の時間帯（20 なら 20時台まで）'],
   ['sched_places', '高原,鴨川南,飛鳥井', '日程: 希望場所の選択肢（カンマ区切り。「どこでも」「その他」は必ず出る）']
@@ -1134,7 +1135,13 @@ function virtualVisible_(cfg) {
 }
 
 // 運営画面から変えられる設定（ここにあるものだけ書き換えを許す）
-var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating' };
+var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating', sched_visible: 'bool' };
+
+// 日程タブを表示するか（未設定なら表示）
+function schedVisible_(cfg) {
+  var v = cfg.sched_visible;
+  return v === undefined || v === '' || v === null || toBool_(v) || v === 1;
+}
 
 /** settings シートの1項目を書き換える（無ければ行を足す） */
 function setSetting_(key, value) {
@@ -1166,6 +1173,7 @@ function publicState_() {
   var showVirtual = virtualVisible_(cfg);
   pubCfg.virtual_rating_visible = showVirtual;
   pubCfg.virtual_initial_rating = virtualStart_(cfg);
+  pubCfg.sched_visible = schedVisible_(cfg);
   return {
     now: Date.now(),
     settings: pubCfg,
@@ -1367,6 +1375,7 @@ function applySchedule(action, rows, p, players, cfg, now, device) {
 /** 参加の登録・取り消し（シートを書き換える） */
 function schedWrite_(action, p) {
   var cfg = readSettings_(), players = readPlayers_();
+  if (!schedVisible_(cfg)) throw new Error('日程は運営が非表示にしています');
   var device = deviceLabel_(p.device);
   if (!sheetExists_(SHEET.schedule)) { // setup を実行していなくても使えるように、初めての書き込みで作る
     var nsh = ss_().insertSheet(SHEET.schedule);

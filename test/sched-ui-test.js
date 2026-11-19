@@ -219,6 +219,28 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   if ((await page.inputValue('#schFrom')) !== '14' || (await page.inputValue('#schTo')) !== '16') fail('マウスでなぞった範囲: ' + await page.inputValue('#schFrom') + '-' + await page.inputValue('#schTo'));
   await page.click('[data-sclose].btn');
 
+  // 運営画面で日程タブを非表示にすると、タブが消える（日程タブを開いていたらランキングに戻る）
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.click('nav button[data-tab=sched]');
+  await page.waitForSelector('#schGrid');
+  const key = g.__sheets.settings.data.find(r => r[0] === 'admin_key')[1];
+  await page.click('#adminBtn');
+  await page.fill('#adminKey', String(key));
+  await page.click('#adminLogin');
+  await page.waitForSelector('#schedToggle');
+  await page.screenshot({ path: path.join(out, 's10_admin_toggle.png'), fullPage: true });
+  await page.click('#schedToggle');
+  await page.waitForSelector('#schedToggle[data-on="0"]');
+  if (await page.isVisible('nav button[data-tab=sched]')) fail('非表示にしても日程タブが出ている');
+  await page.click('#schedToggle');
+  await page.waitForSelector('#schedToggle[data-on="1"]');
+  if (!(await page.isVisible('nav button[data-tab=sched]'))) fail('表示に戻しても日程タブが出ない');
+  ok(g.api('adminSetting', { admin_key: key, key: 'sched_visible', value: false }));
+  await page.click('nav button[data-tab=sched]');
+  await page.waitForSelector('#schGrid');
+  await page.reload(); await page.waitForSelector('table');
+  if (await page.isVisible('nav button[data-tab=sched]')) fail('読み込み直しても日程タブが出ている');
+
   console.log('page errors:', errors.length ? errors : 'none');
   console.log('日程の画面テスト: OK');
   await browser.close(); server.close();
