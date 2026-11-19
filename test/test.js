@@ -567,6 +567,118 @@ t('試合開始・試合中・結果入力・1投ごとの記録のどの返り�
   eq(bad, []);
 });
 
+
+console.log('■ 日程調整');
+{
+  const mk = () => {
+    const g = loadGas({ now: Date.parse('2026-11-25T10:30:00+09:00') });
+    g.setup();
+    ['p1', 'p2', 'p3'].forEach(id => g.__sheets.players.appendRow([id, id, '', '', true]));
+    g.__sheets.players.appendRow(['px', 'px', '', '', false]);
+    return g;
+  };
+  const S = (g, a, p) => { const r = g.api(a, Object.assign({ device: 'dev1' }, p)); return r; };
+  t('期間は start_at〜end_at の14日、時間帯は 7〜20時台、場所は3つ', () => {
+    const g = mk(); const r = g.api('schedule');
+    eq(r.ok, true, r.error);
+    eq([r.data.dates.length, r.data.dates[0], r.data.dates[13], r.data.day_start, r.data.day_end], [14, '2026-11-24', '2026-12-07', 7, 20]);
+    eq(r.data.places, ['高原', '鴨川南', '飛鳥井']);
+  });
+  t('参加すると1マス1行。同じマスにもう一度参加しても1件のまま（上書き）', () => {
+    const g = mk();
+    let r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }, { date: '2026-11-25', hour: 19 }], place: ['飛鳥井', '高原'], format: 'チーム戦', comment: 'よろしく' });
+    eq(r.ok, true, r.error);
+    eq(r.data.slots.length, 2);
+    eq([r.data.slots[0].place, r.data.slots[0].format, r.data.slots[0].comment], ['高原,飛鳥井', 'チーム戦', 'よろしく']);
+    const c0 = r.data.slots[0].c;
+    g.__advance(60000);
+    r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }], place: [], format: 'どちらでも' });
+    eq(r.data.slots.length, 2);
+    const s18 = r.data.slots.find(x => x.h === 18);
+    eq([s18.place, s18.format, s18.comment, s18.c === c0, s18.u > c0], ['どこでも', 'どちらでも', '', true, true]);
+    eq(r.data.result, { added: 0, updated: 1, removed: 0, skipped: 0 });
+  });
+  t('取り消しと、編集で外した時間の取り消し', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p1', items: [18, 19, 20].map(h => ({ date: '2026-11-26', hour: h })) });
+    let r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-26', hour: 18 }], remove: [18, 19, 20].map(h => ({ date: '2026-11-26', hour: h })), format: '個人戦' });
+    eq(r.ok, true, r.error);
+    eq(r.data.slots.map(x => [x.h, x.format]), [[18, '個人戦']]);
+    r = S(g, 'schedLeave', { player_id: 'p1', items: [{ date: '2026-11-26', hour: 18 }] });
+    eq(r.data.slots.length, 0);
+    eq(g.__sheets.schedule.data.slice(1).filter(row => row.some(v => v !== '')).length, 0);
+  });
+  t('まとめて追加: 参加済みは既定で飛ばし、上書きを選ぶと上書き', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p2', items: [{ date: '2026-11-27', hour: 9 }], comment: '前' });
+    const items = ['2026-11-27', '2026-11-28'].flatMap(d => [9, 10].map(h => ({ date: d, hour: h })));
+    let r = S(g, 'schedSet', { player_id: 'p2', items, comment: '後', skip_existing: true });
+    eq(r.data.result, { added: 3, updated: 0, removed: 0, skipped: 1 });
+    eq(r.data.slots.find(x => x.d === '2026-11-27' && x.h === 9).comment, '前');
+    r = S(g, 'schedSet', { player_id: 'p2', items, comment: '後', skip_existing: false });
+    eq(r.data.result, { added: 0, updated: 4, removed: 0, skipped: 0 });
+  });
+  t('ほかの人の参加には影響しない', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
+    S(g, 'schedSet', { player_id: 'p2', items: [{ date: '2026-11-25', hour: 18 }] });
+    const r = S(g, 'schedLeave', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
+    eq(r.data.slots.map(x => x.p), ['p2']);
+  });
+  t('入力チェック: 過ぎた時間・期間外・時間外・どこでも＋他・その他の空欄・形式・ひとこと101字・参加中でない人', () => {
+    const g = mk();
+    const bad = (p, msg) => { const r = S(g, 'schedSet', Object.assign({ player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] }, p)); eq(r.ok, false); assert.ok(r.error.includes(msg), r.error); };
+    bad({ items: [{ date: '2026-11-25', hour: 9 }] }, '過ぎた時間');
+    bad({ items: [{ date: '2026-12-08', hour: 9 }] }, '期間外');
+    bad({ items: [{ date: '2026-11-26', hour: 21 }] }, '時間割の外');
+    bad({ place: ['どこでも', '高原'] }, '同時に選べません');
+    bad({ place: ['その他'] }, '「その他」の場所');
+    bad({ place: ['体育館'] }, '選択肢にありません');
+    bad({ format: '3人戦' }, '希望形式');
+    bad({ comment: 'あ'.repeat(101) }, '100文字');
+    bad({ player_id: 'px' }, '参加中ではない');
+    bad({ player_id: 'zz' }, '選手が見つかりません');
+    // いまの時間（10時台）は参加できる
+    eq(S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 10 }] }).ok, true);
+  });
+  t('その他は自由入力を保存。数式に見える文字はそのまま返る', () => {
+    const g = mk();
+    const r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }], place: ['その他', '鴨川南'], place_other: '=体育館', comment: '+1' });
+    eq(r.ok, true, r.error);
+    eq([r.data.slots[0].place, r.data.slots[0].other, r.data.slots[0].comment], ['鴨川南,その他', '=体育館', '+1']);
+    assert.ok(String(g.__sheets.schedule.data[1][4]).startsWith("'"));
+  });
+  t('上限: 1回200時間まで、1人400時間まで', () => {
+    const g = mk();
+    const all = g.api('schedule').data.dates.slice(2).flatMap(d => Array.from({ length: 14 }, (_, i) => ({ date: d, hour: 7 + i }))); // 11/26〜 12日×14時間=168
+    let r = S(g, 'schedSet', { player_id: 'p1', items: all, remove: all.slice(0, 40).map(x => ({ date: x.date, hour: x.hour + 0 })) });
+    eq(r.ok, false); assert.ok(r.error.includes('200'), r.error);
+    eq(S(g, 'schedSet', { player_id: 'p1', items: all }).ok, true);
+    // 1人の上限は、テストでは小さくして試す（400 → 170）
+    g.SCHED_MAX_PER_PLAYER = 170;
+    r = S(g, 'schedSet', { player_id: 'p1', items: [11, 12, 13].map(h => ({ date: '2026-11-25', hour: h })) });
+    eq(r.ok, false); assert.ok(r.error.includes('170時間まで'), r.error);
+    eq(S(g, 'schedSet', { player_id: 'p1', items: [11, 12].map(h => ({ date: '2026-11-25', hour: h })) }).ok, true);
+    eq(S(g, 'schedSet', { player_id: 'p2', items: all }).ok, true); // ほかの人は別に数える
+  });
+  t('schedule シートが無くても（setup 前の版のシート）、初めての参加でシートを作る', () => {
+    const g = mk();
+    delete g.__sheets.schedule;
+    eq(g.api('schedule').data.slots, []);
+    const r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
+    eq(r.ok, true, r.error);
+    eq(r.data.slots.length, 1);
+  });
+  t('シートに日付が Date で入っていても読める', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
+    g.__sheets.schedule.data[1][1] = new Date('2026-11-25T00:00:00+09:00');
+    const r = g.api('schedule');
+    eq(r.data.slots[0].d, '2026-11-25');
+    eq(badValues(r, 'schedule', []), []);
+  });
+}
+
 console.log('■ 画面側の式がサーバーと一致');
 t('index.html の computeDelta と Code.gs の結果が同じ', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
