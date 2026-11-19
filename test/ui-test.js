@@ -278,6 +278,20 @@ const server = http.createServer((req, res) => {
   await page.click('#adminBtn');
   await page.click('#virtualToggle');
   await page.waitForSelector('#virtualToggle[data-on="1"]');
+  // 開始値を 1500 にすると、個人ページに「1500 から」と出る。空欄に戻すと固定レートから
+  await page.fill('#virtualStart', '1500');
+  await page.click('#virtualStartSave');
+  await page.waitForFunction(() => document.querySelector('#virtualStart') && document.querySelector('#virtualStart').value === '1500' && S.settings.virtual_initial_rating === 1500);
+  await page.screenshot({ path: path.join(out, '6c_admin_virtual_start.png'), fullPage: true });
+  await page.click('nav button[data-tab=me]');
+  await page.selectOption('#meView', 'A');
+  const aHero1500 = await page.$eval('.hero', x => x.textContent);
+  console.log('A hero (start 1500):', aHero1500.replace(/\s+/g, ' '));
+  if (!aHero1500.includes('1500 から')) throw new Error('開始値が反映されていない: ' + aHero1500);
+  await page.click('#adminBtn');
+  await page.fill('#virtualStart', '');
+  await page.click('#virtualStartSave');
+  await page.waitForFunction(() => S.settings.virtual_initial_rating === null);
   await page.click('nav button[data-tab=me]');
   await page.selectOption('#meView', 'A');
   await page.click('nav button[data-tab=rank]');

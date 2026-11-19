@@ -63,6 +63,7 @@ var DEFAULT_SETTINGS = [
   ['admin_key', 'change-me', '運営画面のパスワード（必ず変更してください）'],
   ['awards_visible', true, '特別賞をアプリに表示するか（FALSE で非表示。awards シートには常に出る）'],
   ['virtual_rating_visible', true, 'レート固定の人の「変動した場合」の参考レートをアプリに表示するか（FALSE で非表示。運営画面からも切り替えられる）'],
+  ['virtual_initial_rating', '', '参考レートの開始値（空欄ならその人の固定レートから。運営画面からも変えられる）'],
   ['memorial_step', 100, 'メモリアル賞の区切り（100 なら 100戦目・200戦目…）'],
   ['bonus_wins_step', 10, '追加ボーナス: 勝利数の区切り（10 なら 10勝・20勝…）'],
   ['bonus_wins_pt', 10, '追加ボーナス: 勝利数の1区切りあたりのポイント（20勝なら 2×10＝+20）'],
@@ -126,19 +127,26 @@ function pairKey_(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
  * matches: [{match_id, started_at, team1_ids, team2_ids, winner, status}]
  * 戻り値: { ratings, fixed, stats, deltas, history, singlesCount, virtual, virtualHistory }
  * virtual: レート固定の人が「ほかの人と同じように変動した場合」のレート（参考値）。
- *   固定レートから始め、各試合で自分のチーム平均だけを参考レートに置き換えて増減を計算する。
+ *   固定レート（settings の virtual_initial_rating が入っていればその値）から始め、各試合で自分のチーム平均だけを参考レートに置き換えて増減を計算する。
  *   公式のレート（ratings）と相手側の計算には一切影響しない。
  */
+function virtualStart_(cfg) {
+  var v = cfg && cfg.virtual_initial_rating;
+  if (v === '' || v === null || v === undefined || isNaN(Number(v))) return null;
+  return Number(v);
+}
+
 function computeRatings(players, matches, cfg) {
   cfg = cfg || {};
   var base = num_(cfg.initial_rating, 1500);
   var ratings = {}, fixed = {}, stats = {}, history = {}, virtual = {}, virtualHistory = {};
+  var vStart = virtualStart_(cfg); // 参考レートの開始値（未設定なら null = 固定レートから）
   players.forEach(function (p) {
     var id = String(p.player_id);
     var fr = p.fixed_rating;
     if (fr !== '' && fr !== null && fr !== undefined && !isNaN(Number(fr))) fixed[id] = Number(fr);
     ratings[id] = fixed[id] !== undefined ? fixed[id] : num_(p.initial_rating, base);
-    if (fixed[id] !== undefined) { virtual[id] = fixed[id]; virtualHistory[id] = []; }
+    if (fixed[id] !== undefined) { virtual[id] = vStart !== null ? vStart : fixed[id]; virtualHistory[id] = []; }
     stats[id] = { matches: 0, team_matches: 0, wins: 0, losses: 0 };
     history[id] = [];
   });
@@ -966,7 +974,17 @@ function handle_(action, p) {
       if (action === 'adminSetting') {
         var sk = String(p.key || '');
         if (!ADMIN_SETTINGS.hasOwnProperty(sk)) throw new Error('この設定は変更できません: ' + sk);
-        var sv = p.value === true || String(p.value).toUpperCase() === 'TRUE';
+        var sv;
+        if (ADMIN_SETTINGS[sk] === 'bool') sv = p.value === true || String(p.value).toUpperCase() === 'TRUE';
+        else {
+          // レート: 空欄は「固定レートから」。それ以外は 0〜5000 の整数
+          var raw = String(p.value === undefined || p.value === null ? '' : p.value).trim();
+          if (raw === '') sv = '';
+          else {
+            sv = Number(raw);
+            if (!/^-?\d+$/.test(raw) || sv < 0 || sv > 5000) throw new Error('レートは 0〜5000 の整数で入れてください');
+          }
+        }
         setSetting_(sk, sv);
         log_('adminSetting', 'admin', { key: sk, value: sv });
         return publicState_();
@@ -1105,7 +1123,7 @@ function virtualVisible_(cfg) {
 }
 
 // 運営画面から変えられる設定（ここにあるものだけ書き換えを許す）
-var ADMIN_SETTINGS = { virtual_rating_visible: 'bool' };
+var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating' };
 
 /** settings シートの1項目を書き換える（無ければ行を足す） */
 function setSetting_(key, value) {
@@ -1136,6 +1154,7 @@ function publicState_() {
   ['start_at', 'end_at', 'result_deadline'].forEach(function (k) { pubCfg[k] = toTime_(cfg[k]); });
   var showVirtual = virtualVisible_(cfg);
   pubCfg.virtual_rating_visible = showVirtual;
+  pubCfg.virtual_initial_rating = virtualStart_(cfg);
   return {
     now: Date.now(),
     settings: pubCfg,
