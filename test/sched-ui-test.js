@@ -86,52 +86,77 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   await page.click('.schsheet .schx');
   if (await page.$(cell('2026-11-25', 18) + ' .ndot')) fail('開いたのに新着の点が残る');
   if ((await page.textContent('[data-snew]')).trim() !== '新着 2件') fail('開いた分が新着から外れない');
-  // もう一度開くと「新」は出ない（そのときだけ）
-  await page.click(cell('2026-11-25', 18));
-  await page.waitForSelector('.schsheet');
-  if (await page.$('.schsheet .newb')) fail('2回目にも「新」が出る');
+  // 標準は「時間を選んで参加」。操作の注意書きは時間割の上
+  if ((await page.getAttribute('[data-smode="pick"]', 'class')) !== 'on') fail('最初が「時間を選んで参加」になっていない');
+  const hintBox = await page.locator('.schhint').boundingBox(), gridBox = await page.locator('#schGrid').boundingBox();
+  if (!(hintBox.y < gridBox.y)) fail('注意書きが時間割の上にない');
+  // タップで複数選択（詳細は開かない）→ 下の「参加登録」でまとめて登録
+  for (const [d, h] of [['2026-11-26', 18], ['2026-11-26', 19], ['2026-11-26', 20], ['2026-11-27', 9]]) await page.click(cell(d, h));
+  if (await page.$('.schsheet')) fail('タップで詳細が開いてしまう');
+  if ((await page.$$('#schGrid td.sel')).length !== 4) fail('タップで選べない');
+  await page.click(cell('2026-11-27', 9));
+  if ((await page.$$('#schGrid td.sel')).length !== 3) fail('もう一度タップで外れない');
+  await page.click(cell('2026-11-27', 9));
+  await page.click(cell('2026-11-25', 9)); // 過ぎた時間は選べない（参加者を見せる）
+  if ((await page.$$('#schGrid td.sel')).length !== 4) fail('過ぎた時間が選べてしまう');
   await page.click('.schsheet .schx');
-
-  // 空きのマスをタップ → 参加する → 場所を2つ、形式、ひとこと
-  await page.click(cell('2026-11-26', 18));
-  await page.click('[data-sjoin]');
-  await page.waitForSelector('#schFrom');
+  if (!/4時間を選択中/.test(await page.textContent('.schbar'))) fail('選択中の表示: ' + await page.textContent('.schbar'));
+  await page.screenshot({ path: path.join(out, 's4a_pick.png') });
+  await page.click('[data-sselgo]');
+  await page.waitForSelector('.schsellist');
+  const sl = await page.textContent('.schsellist');
+  if (!/11\/26\(木\) 18〜20時台/.test(sl) || !/11\/27\(金\) 9時台/.test(sl)) fail('選んだ時間の表示: ' + sl);
   if (await page.$('[data-splace="どこでも"].on') === null) fail('最初は「どこでも」になっていない');
   await page.click('[data-splace="高原"]');
   await page.click('[data-splace="飛鳥井"]');
   if (await page.$('[data-splace="どこでも"].on')) fail('場所を選んでも「どこでも」が外れない');
   await page.click('[data-sformat="個人戦"]');
   await page.fill('#schComment', '初めてです');
-  await page.selectOption('#schTo', '20');
   await page.click('[data-splace="その他"]');
   await page.fill('#schOther', '公園');
   if ((await page.inputValue('#schComment')) !== '初めてです') fail('場所を選ぶとひとことが消える');
   await page.screenshot({ path: path.join(out, 's4_join_form.png') });
   await page.click('[data-ssave]');
   await page.waitForSelector('.schsheet', { state: 'detached' });
-  const j = slotsOf('P01').filter(x => x.d === '2026-11-26' && x.h >= 18);
-  if (j.length !== 3 || j[0].place !== '高原,飛鳥井,その他' || j[0].other !== '公園' || j[0].format !== '個人戦' || j[0].comment !== '初めてです') fail('参加の内容: ' + JSON.stringify(j));
+  const j = slotsOf('P01').filter(x => (x.d === '2026-11-26' && x.h >= 18) || (x.d === '2026-11-27' && x.h === 9));
+  if (j.length !== 4 || j.some(x => x.place !== '高原,飛鳥井,その他' || x.other !== '公園' || x.format !== '個人戦' || x.comment !== '初めてです')) fail('参加の内容: ' + JSON.stringify(j));
   if (!(await page.$(cell('2026-11-26', 19) + '.mine'))) fail('参加したマスが自分の枠にならない');
-  // 「どこでも」を押すと他が外れる
+  if (await page.$('.schbar')) fail('登録したのに選択が残る');
+
+  // 「参加者を見る」に切り替えると、タップで詳細。2回目は「新」が出ない
+  await page.click('[data-smode="view"]');
+  if (!/参加者が見られます/.test(await page.textContent('.schhint'))) fail('参加者を見るの注意書き');
+  await page.click(cell('2026-11-25', 18));
+  await page.waitForSelector('.schsheet');
+  if (await page.$('.schsheet .newb')) fail('2回目にも「新」が出る');
+  await page.click('.schsheet .schx');
+  // 編集: 「どこでも」を押すと他が外れる。範囲を狭めると外した時間は取り消し
   await page.click(cell('2026-11-26', 19));
   await page.click('[data-sedit]');
   await page.waitForSelector('#schFrom');
   if ((await page.inputValue('#schFrom')) !== '18' || (await page.inputValue('#schTo')) !== '20') fail('編集のまとまりが 18〜20 になっていない');
   await page.click('[data-splace="どこでも"]');
   if ((await page.$$('.schchip.on')).length !== 1) fail('「どこでも」で他が外れない');
-  await page.selectOption('#schTo', '19'); // 20時台は外す → 取り消し
+  await page.selectOption('#schTo', '19');
   await page.click('[data-ssave]');
   await page.waitForSelector('.schsheet', { state: 'detached' });
   const e2 = slotsOf('P01').filter(x => x.d === '2026-11-26' && x.h >= 18);
   if (e2.length !== 2 || e2.some(x => x.place !== 'どこでも' || x.format !== '個人戦')) fail('編集の結果: ' + JSON.stringify(e2));
-
-  // 参加をやめる
+  // 参加をやめる（詳細から1時間）
   await page.click(cell('2026-11-26', 19));
   await page.click('[data-sleave]');
   await page.waitForSelector('.schsheet', { state: 'detached' });
   if (slotsOf('P01').some(x => x.d === '2026-11-26' && x.h === 19)) fail('参加をやめられない');
+  // 選んだ時間の参加をまとめてやめる（2回押す）
+  await page.click('[data-smode="pick"]');
+  await page.click(cell('2026-11-26', 18)); await page.click(cell('2026-11-27', 9));
+  await page.click('[data-sselleave]');
+  if (!/もう一度/.test(await page.textContent('[data-sselleave]'))) fail('取り消しの確認が出ない');
+  await page.click('[data-sselleave]');
+  await page.waitForSelector('.schbar', { state: 'detached' });
+  if (slotsOf('P01').some(x => (x.d === '2026-11-26' && x.h === 18) || (x.d === '2026-11-27' && x.h === 9))) fail('まとめて参加をやめられない');
 
-  // 長押ししてなぞる（スマホ）: 11/27 9〜12時台 → 入力画面がその範囲で開く
+  // 長押ししてなぞる（スマホ）: 11/27 9〜12時台を選び、少し間を空けて登録画面
   await page.click('[data-sday="3"]');
   await page.waitForSelector(cell('2026-11-28', 9));
   await page.click('[data-sday="-3"]');
@@ -147,17 +172,23 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   await page.waitForTimeout(500);
   await touch('touchmove', { x: a.x, y: (a.y + z.y) / 2 });
   await touch('touchmove', z);
-  if ((await page.$$('#schGrid td.sel')).length !== 4) fail('なぞった範囲が4マスにならない: ' + (await page.$$('#schGrid td.sel')).length);
+  if ((await page.$$('#schGrid td.drag')).length !== 4) fail('なぞった範囲が4マスにならない: ' + (await page.$$('#schGrid td.drag')).length);
   await page.screenshot({ path: path.join(out, 's5_drag.png') });
   await touch('touchend', z);
-  await page.waitForSelector('#schFrom');
-  if ((await page.inputValue('#schFrom')) !== '9' || (await page.inputValue('#schTo')) !== '12') fail('なぞった範囲で開かない: ' + await page.inputValue('#schFrom') + '-' + await page.inputValue('#schTo'));
-  await page.click('[data-sclose].btn');
+  if ((await page.$$('#schGrid td.sel')).length !== 4) fail('なぞった範囲が選択にならない');
+  if (await page.$('.schsheet')) fail('なぞったあとすぐに登録画面が出る');
+  await page.waitForSelector('.schsellist', { timeout: 2000 });
+  if (!/11\/27\(金\) 9〜12時台/.test(await page.textContent('.schsellist'))) fail('なぞった範囲で開かない: ' + await page.textContent('.schsellist'));
+  await page.click('[data-sclose].btn'); // 戻ると選択は残る
+  if ((await page.$$('#schGrid td.sel')).length !== 4) fail('戻ると選択が消える');
+  await page.click('[data-sselclear]');
+  if ((await page.$$('#schGrid td.sel')).length !== 0) fail('選択を外せない');
   // 長押しせずに動かすと選ばない（スクロール）
   await touch('touchstart', a);
   await touch('touchmove', z);
   await touch('touchend', z);
-  if (await page.$('.schsheet')) fail('長押しなしでなぞると開いてしまう');
+  await page.waitForTimeout(800);
+  if (await page.$('.schsheet') || (await page.$$('#schGrid td.sel')).length) fail('長押しなしでなぞると選ばれてしまう');
 
   // まとめて追加: 土日 × 18〜20時台（参加済みは飛ばす）
   await page.click('[data-sbulk]');
@@ -186,6 +217,7 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   await page.uncheck('#schMineOnly');
 
   // 案A: このメンバーで試合を始める（3人 → 選手選びで上に出す）
+  await page.click('[data-smode="view"]');
   await page.click(cell('2026-11-25', 18));
   await page.click('[data-splay]');
   await page.waitForSelector('.schcands');
@@ -218,6 +250,28 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   await page.waitForSelector('#schFrom');
   if ((await page.inputValue('#schFrom')) !== '14' || (await page.inputValue('#schTo')) !== '16') fail('マウスでなぞった範囲: ' + await page.inputValue('#schFrom') + '-' + await page.inputValue('#schTo'));
   await page.click('[data-sclose].btn');
+
+  // 運営画面で日程タブを非表示にすると、タブが消える（日程タブを開いていたらランキングに戻る）
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.click('nav button[data-tab=sched]');
+  await page.waitForSelector('#schGrid');
+  const key = g.__sheets.settings.data.find(r => r[0] === 'admin_key')[1];
+  await page.click('#adminBtn');
+  await page.fill('#adminKey', String(key));
+  await page.click('#adminLogin');
+  await page.waitForSelector('#schedToggle');
+  await page.screenshot({ path: path.join(out, 's10_admin_toggle.png'), fullPage: true });
+  await page.click('#schedToggle');
+  await page.waitForSelector('#schedToggle[data-on="0"]');
+  if (await page.isVisible('nav button[data-tab=sched]')) fail('非表示にしても日程タブが出ている');
+  await page.click('#schedToggle');
+  await page.waitForSelector('#schedToggle[data-on="1"]');
+  if (!(await page.isVisible('nav button[data-tab=sched]'))) fail('表示に戻しても日程タブが出ない');
+  ok(g.api('adminSetting', { admin_key: key, key: 'sched_visible', value: false }));
+  await page.click('nav button[data-tab=sched]');
+  await page.waitForSelector('#schGrid');
+  await page.reload(); await page.waitForSelector('table');
+  if (await page.isVisible('nav button[data-tab=sched]')) fail('読み込み直しても日程タブが出ている');
 
   console.log('page errors:', errors.length ? errors : 'none');
   console.log('日程の画面テスト: OK');

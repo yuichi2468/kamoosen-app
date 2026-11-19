@@ -669,6 +669,22 @@ console.log('■ 日程調整');
     eq(r.ok, true, r.error);
     eq(r.data.slots.length, 1);
   });
+  t('運営画面で日程タブを非表示にできる（非表示のあいだは登録できない。登録済みは残る）', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
+    eq(g.api('state').data.settings.sched_visible, true);
+    const key = g.api('state').ok && g.__sheets.settings.data.find(r => r[0] === 'admin_key')[1];
+    let r = g.api('adminSetting', { admin_key: key, key: 'sched_visible', value: false });
+    eq(r.ok, true, r.error);
+    eq(r.data.settings.sched_visible, false);
+    r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 19 }] });
+    eq(r.ok, false); assert.ok(r.error.includes('非表示'), r.error);
+    eq(S(g, 'schedLeave', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] }).ok, false);
+    eq(g.api('schedule').data.slots.length, 1);
+    r = g.api('adminSetting', { admin_key: key, key: 'sched_visible', value: true });
+    eq(r.data.settings.sched_visible, true);
+    eq(S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 19 }] }).ok, true);
+  });
   t('シートに日付が Date で入っていても読める', () => {
     const g = mk();
     S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
