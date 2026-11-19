@@ -59,6 +59,31 @@ t('A を含むチームは A を1800として平均', () => {
   const r = G.computeRatings(players, m, cfg); // 平均1650 vs 1500 → +15 / -(20-7.5)=12.5→13
   eq([r.ratings.A, r.ratings.p1, r.ratings.p3], [1800, 1515, 1487]);
 });
+t('参考レート: 1500 に負けた A は、1800 から変動した場合 -35（公式は1800のまま）', () => {
+  const m = [{ match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }];
+  const r = G.computeRatings(players, m, cfg);
+  eq([r.ratings.A, r.virtual.A, r.ratings.p1], [1800, 1765, 1542]); // -(20+300*0.05)=-35
+  eq(r.virtualHistory.A, [{ match_id: 'm1', at: 1, delta: -35, rating: 1765 }]);
+  eq(r.history.A[0].delta, 0);
+});
+t('参考レートは前の試合の参考レートで次を計算し、相手の増減は変えない', () => {
+  // m1: A が p1 に負け → 参考1765。m2: A(参考1765) が p3 に負け → -(20+265*0.05)=-33.25→-33 → 1732
+  const ms = [
+    { match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' },
+    { match_id: 'm2', started_at: 2, team1_ids: 'p3', team2_ids: 'A', winner: 1, status: 'done' },
+    { match_id: 'm3', started_at: 3, team1_ids: 'A,p1', team2_ids: 'p4,p2', winner: 1, status: 'done' },
+  ];
+  const r = G.computeRatings(players, ms, cfg);
+  // 公式のレート（相手・味方を含む）は参考レートの計算があっても今までどおり（変更前のコードと同じ値）
+  eq([r.ratings.A, r.ratings.p1, r.ratings.p3, r.ratings.p4, r.ratings.p2], [1800, 1556, 1542, 1488, 1513]);
+  eq(r.virtualHistory.A.map(x => x.rating).slice(0, 2), [1765, 1732]);
+  // m3: 参考の自チーム平均 (1732+1542)/2=1637 vs (1500+1525)/2=1512.5 → 差124.5 → +24-7.47=16.53→17
+  eq(r.virtual.A, 1749);
+});
+t('参考レートはレート固定の人だけ', () => {
+  const r = G.computeRatings(players, [], cfg);
+  eq(Object.keys(r.virtual), ['A']); eq(r.virtual.A, 1800);
+});
 t('開始時刻順に計算（入力順が逆でも同じ）', () => {
   const m1 = { match_id: 'm1', started_at: T('2026-11-25T10:00:00+09:00'), team1_ids: 'p1', team2_ids: 'p3', winner: 1, status: 'done' };
   const m2 = { match_id: 'm2', started_at: T('2026-11-25T11:00:00+09:00'), team1_ids: 'p1', team2_ids: 'p4', winner: 2, status: 'done' };
@@ -160,6 +185,29 @@ t('初期設定 → 開始 → 結果 → 確認 → ランキングシート', 
   // 締切
   g.__setNow(Date.parse('2026-12-07T21:00:00+09:00'));
   r = g.api('start', { team1: ['p3'], team2: ['A']}); eq(r.ok, false); eq(r.error, '試合開始の締切を過ぎています');
+});
+t('参考レートの表示は運営画面から切り替えられる（settings に行が無くても足す）', () => {
+  const g = loadGas();
+  g.setup();
+  g.__sheets.players.appendRow(['A', '王者', '', 1800, true]);
+  g.__sheets.players.appendRow(['p1', 'あ', '', '', true]);
+  let r = g.api('start', { team1: ['p1'], team2: ['A'] }); eq(r.ok, true, r.error);
+  r = g.api('result', { match_id: r.data.matches[0].id, team1_legs: 2, team2_legs: 0 }); eq(r.ok, true, r.error);
+  let a = r.data.players.find(p => p.id === 'A');
+  eq([a.rating, a.virtual_rating, r.data.settings.virtual_rating_visible], [1800, 1765, true]);
+  eq(r.data.virtual_history.A.length, 1);
+  // 既存のシートで行が無い場合も、運営画面から切り替えると行が足される
+  const st = g.__sheets.settings;
+  const i = st.data.findIndex(row => row[0] === 'virtual_rating_visible'); st.data.splice(i, 1);
+  r = g.api('adminSetting', { admin_key: 'x', key: 'virtual_rating_visible', value: false }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'admin_key', value: false }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: false }); eq(r.ok, true, r.error);
+  a = r.data.players.find(p => p.id === 'A');
+  eq([a.rating, a.virtual_rating === undefined ? null : a.virtual_rating, r.data.settings.virtual_rating_visible, r.data.virtual_history], [1800, null, false, {}]);
+  eq(st.data.filter(row => row[0] === 'virtual_rating_visible').map(row => row[1]), [false]);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: true }); eq(r.ok, true, r.error);
+  eq(r.data.players.find(p => p.id === 'A').virtual_rating, 1765);
+  eq(st.data.filter(row => row[0] === 'virtual_rating_visible').map(row => row[1]), [true]);
 });
 t('締切前に開始した試合は 21:00 以降も結果入力できる', () => {
   const g = loadGas({ now: Date.parse('2026-12-07T20:59:00+09:00') });

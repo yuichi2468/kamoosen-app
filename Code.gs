@@ -62,6 +62,7 @@ var DEFAULT_SETTINGS = [
   ['qualify_count', 8, '順位戦に進む人数'],
   ['admin_key', 'change-me', '運営画面のパスワード（必ず変更してください）'],
   ['awards_visible', true, '特別賞をアプリに表示するか（FALSE で非表示。awards シートには常に出る）'],
+  ['virtual_rating_visible', true, 'レート固定の人の「変動した場合」の参考レートをアプリに表示するか（FALSE で非表示。運営画面からも切り替えられる）'],
   ['memorial_step', 100, 'メモリアル賞の区切り（100 なら 100戦目・200戦目…）'],
   ['bonus_wins_step', 10, '追加ボーナス: 勝利数の区切り（10 なら 10勝・20勝…）'],
   ['bonus_wins_pt', 10, '追加ボーナス: 勝利数の1区切りあたりのポイント（20勝なら 2×10＝+20）'],
@@ -123,17 +124,21 @@ function pairKey_(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
  * 全試合からレートを再計算する
  * players: [{player_id, name, initial_rating, fixed_rating, active}]
  * matches: [{match_id, started_at, team1_ids, team2_ids, winner, status}]
- * 戻り値: { ratings, stats, deltas, history, singlesCount }
+ * 戻り値: { ratings, fixed, stats, deltas, history, singlesCount, virtual, virtualHistory }
+ * virtual: レート固定の人が「ほかの人と同じように変動した場合」のレート（参考値）。
+ *   固定レートから始め、各試合で自分のチーム平均だけを参考レートに置き換えて増減を計算する。
+ *   公式のレート（ratings）と相手側の計算には一切影響しない。
  */
 function computeRatings(players, matches, cfg) {
   cfg = cfg || {};
   var base = num_(cfg.initial_rating, 1500);
-  var ratings = {}, fixed = {}, stats = {}, history = {};
+  var ratings = {}, fixed = {}, stats = {}, history = {}, virtual = {}, virtualHistory = {};
   players.forEach(function (p) {
     var id = String(p.player_id);
     var fr = p.fixed_rating;
     if (fr !== '' && fr !== null && fr !== undefined && !isNaN(Number(fr))) fixed[id] = Number(fr);
     ratings[id] = fixed[id] !== undefined ? fixed[id] : num_(p.initial_rating, base);
+    if (fixed[id] !== undefined) { virtual[id] = fixed[id]; virtualHistory[id] = []; }
     stats[id] = { matches: 0, team_matches: 0, wins: 0, losses: 0 };
     history[id] = [];
   });
@@ -158,6 +163,19 @@ function computeRatings(players, matches, cfg) {
     var d = w === 1 ? computeDelta(a1, a2, cfg) : computeDelta(a2, a1, cfg);
     var d1 = w === 1 ? d.gain : -d.loss, d2 = w === 1 ? -d.loss : d.gain;
     var isTeam = !(t1.length === 1 && t2.length === 1);
+    // レート固定の人の参考レート: 自分のチーム平均だけ参考レートで計算し直す（公式の計算は変えない）
+    var shadow = function (team, opp, won) {
+      team.forEach(function (id) {
+        if (fixed[id] === undefined) return;
+        var own = team.reduce(function (s, x) { return s + (x === id ? virtual[id] : ratings[x]); }, 0) / team.length;
+        var vd = computeDelta(won ? own : avg(opp), won ? avg(opp) : own, cfg);
+        var dv = won ? vd.gain : -vd.loss;
+        virtual[id] += dv;
+        virtualHistory[id].push({ match_id: m.match_id, at: toTime_(m.started_at), delta: dv, rating: virtual[id] });
+      });
+    };
+    shadow(t1, t2, w === 1);
+    shadow(t2, t1, w === 2);
     var apply = function (team, delta, won) {
       team.forEach(function (id) {
         if (fixed[id] === undefined) ratings[id] += delta;
@@ -183,7 +201,8 @@ function computeRatings(players, matches, cfg) {
     }
   });
 
-  return { ratings: ratings, fixed: fixed, stats: stats, deltas: deltas, history: history, singlesCount: singlesCount };
+  return { ratings: ratings, fixed: fixed, stats: stats, deltas: deltas, history: history, singlesCount: singlesCount,
+           virtual: virtual, virtualHistory: virtualHistory };
 }
 
 /**
@@ -932,7 +951,7 @@ function handle_(action, p) {
     if (!mt) throw new Error('試合が見つかりません');
     return { throws: mt.scoring === 'throws' ? mt.throwList : [], leg_orders: mt.legOrders };
   }
-  var writeActions = { start: 1, result: 1, cancel: 1, sync: 1, adminVoid: 1, adminRestore: 1, adminRecalc: 1, adminCheck: 1 };
+  var writeActions = { start: 1, result: 1, cancel: 1, sync: 1, adminVoid: 1, adminRestore: 1, adminRecalc: 1, adminCheck: 1, adminSetting: 1 };
   if (!writeActions[action]) throw new Error('不明な操作です: ' + action);
 
   var lock = LockService.getScriptLock();
@@ -944,6 +963,14 @@ function handle_(action, p) {
       if (String(p.admin_key || '') !== String(cfg.admin_key) || String(cfg.admin_key) === '') throw new Error('運営パスワードが違います');
       if (action === 'adminCheck') return { ok: true };
       if (action === 'adminRecalc') { recalc(); log_('adminRecalc', 'admin', ''); return publicState_(); }
+      if (action === 'adminSetting') {
+        var sk = String(p.key || '');
+        if (!ADMIN_SETTINGS.hasOwnProperty(sk)) throw new Error('この設定は変更できません: ' + sk);
+        var sv = p.value === true || String(p.value).toUpperCase() === 'TRUE';
+        setSetting_(sk, sv);
+        log_('adminSetting', 'admin', { key: sk, value: sv });
+        return publicState_();
+      }
       var m0 = findMatch_(matches, p.match_id);
       setCells_(SHEET.matches, m0._row, { status: action === 'adminVoid' ? 'void' : (m0.winner ? 'done' : 'playing'), note: p.note || m0.note || '' });
       log_(action, 'admin', { match_id: p.match_id, note: p.note || '' });
@@ -1071,6 +1098,23 @@ function readThrowStats_() {
   return map;
 }
 
+// レート固定の人の参考レートを表示するか（未設定なら表示）
+function virtualVisible_(cfg) {
+  var v = cfg.virtual_rating_visible;
+  return v === undefined || v === '' || v === null || toBool_(v) || v === 1;
+}
+
+// 運営画面から変えられる設定（ここにあるものだけ書き換えを許す）
+var ADMIN_SETTINGS = { virtual_rating_visible: 'bool' };
+
+/** settings シートの1項目を書き換える（無ければ行を足す） */
+function setSetting_(key, value) {
+  var row = readTable_(SHEET.settings).filter(function (r) { return String(r.key) === key; })[0];
+  if (row) { setCells_(SHEET.settings, row._row, { value: value }); return; }
+  var def = DEFAULT_SETTINGS.filter(function (r) { return r[0] === key; })[0];
+  appendObj_(SHEET.settings, { key: key, value: value, description: def ? def[2] : '' });
+}
+
 function awardsVisible_(cfg) {
   var v = cfg.awards_visible;
   return v === undefined || v === '' || v === null || toBool_(v) || v === 1;
@@ -1085,16 +1129,19 @@ function publicState_() {
   var pubCfg = {};
   ['start_at', 'end_at', 'result_deadline', 'initial_rating', 'win_base', 'win_coef', 'loss_base', 'loss_coef',
    'min_gain', 'min_loss', 'max_team_size', 'max_singles_vs_same', 'min_matches', 'min_team_matches',
-   'qualify_count'].forEach(function (k) {
+   'qualify_count', 'virtual_rating_visible'].forEach(function (k) {
     var v = cfg[k];
     pubCfg[k] = v instanceof Date ? v.getTime() : v;
   });
   ['start_at', 'end_at', 'result_deadline'].forEach(function (k) { pubCfg[k] = toTime_(cfg[k]); });
+  var showVirtual = virtualVisible_(cfg);
+  pubCfg.virtual_rating_visible = showVirtual;
   return {
     now: Date.now(),
     settings: pubCfg,
     players: players.map(function (p) {
       return { id: p.player_id, name: String(p.name), rating: res.ratings[p.player_id], fixed: res.fixed[p.player_id] !== undefined,
+               virtual_rating: showVirtual ? res.virtual[p.player_id] : undefined, // レート固定の人だけ。変動した場合の参考値（設定で非表示にできる）
                active: p.active !== false, stats: res.stats[p.player_id] };
     }),
     ranking: ranking,
@@ -1118,6 +1165,7 @@ function publicState_() {
     profiles: computeProfiles(players, matches),
     awards: awardsVisible_(cfg) ? computeAwards(players, matches, res, ranking, cfg) : null,
     history: res.history,
+    virtual_history: showVirtual ? res.virtualHistory : {},
     singles: res.singlesCount
   };
 }
