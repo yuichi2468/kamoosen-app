@@ -20,7 +20,8 @@ var SHEET = {
   throws: 'throws',
   player_stats: 'player_stats',
   awards: 'awards',
-  extra_bonus: 'extra_bonus'
+  extra_bonus: 'extra_bonus',
+  schedule: 'schedule'
 };
 
 var HEADERS = {
@@ -41,7 +42,8 @@ var HEADERS = {
                  'first_sets', 'first_won', 'first_rate', 'second_sets', 'second_won', 'second_rate',
                  'singles_throws', 'singles_hits', 'singles_hit_rate', 'lose_avg', 'lose_sets', 'updated_at'],
   awards: ['award', 'rank', 'player_id', 'name', 'value', 'detail', 'updated_at'],
-  extra_bonus: ['player_id', 'name', 'wins', 'wins_pt', 'partners', 'partners_pt', 'opponents', 'opponents_pt', 'rookie_pt', 'total', 'applied', 'updated_at']
+  extra_bonus: ['player_id', 'name', 'wins', 'wins_pt', 'partners', 'partners_pt', 'opponents', 'opponents_pt', 'rookie_pt', 'total', 'applied', 'updated_at'],
+  schedule: ['player_id', 'date', 'hour', 'place', 'place_other', 'format', 'comment', 'created_at', 'updated_at', 'device']
 };
 
 var DEFAULT_SETTINGS = [
@@ -69,7 +71,10 @@ var DEFAULT_SETTINGS = [
   ['bonus_wins_pt', 10, '追加ボーナス: 勝利数の1区切りあたりのポイント（20勝なら 2×10＝+20）'],
   ['bonus_partner_tiers', '5:5,10:15,20:30,30:45,all:100', '追加ボーナス: チーム戦で組んだ人数の区分（人数:ポイント。all は全員）'],
   ['bonus_opponent_tiers', '5:5,10:15,20:35,30:55,all:100', '追加ボーナス: 個人戦で戦った相手の人数の区分（人数:ポイント。all は全員）'],
-  ['bonus_rookie_pt', 30, 'ハンデボーナス: 1回生（players の rookie 列）に予選終了後に加算するレート。0 でなし']
+  ['bonus_rookie_pt', 30, 'ハンデボーナス: 1回生（players の rookie 列）に予選終了後に加算するレート。0 でなし'],
+  ['sched_day_start', 7, '日程: 時間割の最初の時間帯（7 なら 7時台から）'],
+  ['sched_day_end', 20, '日程: 時間割の最後の時間帯（20 なら 20時台まで）'],
+  ['sched_places', '高原,鴨川南,飛鳥井', '日程: 希望場所の選択肢（カンマ区切り。「どこでも」「その他」は必ず出る）']
 ];
 
 /* =====================================================================
@@ -959,6 +964,12 @@ function handle_(action, p) {
     if (!mt) throw new Error('試合が見つかりません');
     return { throws: mt.scoring === 'throws' ? mt.throwList : [], leg_orders: mt.legOrders };
   }
+  if (action === 'schedule') return scheduleState_(); // 日程タブ（読み取りのみ。日程調整 設計書）
+  if (action === 'schedSet' || action === 'schedLeave') {
+    var slock = LockService.getScriptLock();
+    slock.waitLock(20000);
+    try { return schedWrite_(action, p); } finally { slock.releaseLock(); }
+  }
   var writeActions = { start: 1, result: 1, cancel: 1, sync: 1, adminVoid: 1, adminRestore: 1, adminRecalc: 1, adminCheck: 1, adminSetting: 1 };
   if (!writeActions[action]) throw new Error('不明な操作です: ' + action);
 
@@ -1190,6 +1201,201 @@ function publicState_() {
 }
 
 /* =====================================================================
+ *  日程調整（日程調整 設計書）
+ *  1人1マス（日付×1時間）につき1行。時刻はすべて日本時間で扱う
+ * ===================================================================== */
+
+var SCHED_ANY_PLACE = 'どこでも', SCHED_OTHER = 'その他';
+var SCHED_FORMATS = ['個人戦', 'チーム戦', 'どちらでも'];
+var SCHED_MAX_PER_CALL = 200, SCHED_MAX_PER_PLAYER = 400, SCHED_COMMENT_MAX = 100, SCHED_OTHER_MAX = 20;
+var JST_MS = 9 * 3600000;
+
+/** 時刻 t（ミリ秒）の日本時間の日付 'yyyy-mm-dd' と時（0〜23） */
+function jstParts_(t) {
+  var d = new Date(t + JST_MS);
+  var ds = d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2);
+  return { date: ds, hour: d.getUTCHours() };
+}
+
+/** 'yyyy-mm-dd' の hour 時台の始まりの時刻（ミリ秒） */
+function slotStart_(date, hour) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date));
+  if (!m) return NaN;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(hour)) - JST_MS;
+}
+
+/** シートから読んだ日付（文字または Date）を 'yyyy-mm-dd' にそろえる */
+function schedDate_(v) {
+  if (v instanceof Date || Object.prototype.toString.call(v) === '[object Date]') return jstParts_(v.getTime()).date;
+  var s = String(v || '').trim().replace(/\//g, '-');
+  var m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : '';
+}
+
+/** 設定から、日程の期間（日付の一覧）と時間帯を出す */
+function schedConfig_(cfg) {
+  var from = num_(cfg.sched_day_start, 7), to = num_(cfg.sched_day_end, 20);
+  var start = toTime_(cfg.start_at), end = toTime_(cfg.end_at);
+  var dates = [];
+  if (!isNaN(start) && !isNaN(end) && end > start) {
+    var d0 = jstParts_(start).date, d1 = jstParts_(end - 1).date;
+    for (var t = slotStart_(d0, 12); jstParts_(t).date <= d1 && dates.length < 60; t += 86400000) dates.push(jstParts_(t).date);
+  }
+  var places = String(cfg.sched_places === undefined || cfg.sched_places === null ? '高原,鴨川南,飛鳥井' : cfg.sched_places)
+    .split(',').map(function (x) { return x.trim(); })
+    .filter(function (x) { return x && x !== SCHED_ANY_PLACE && x !== SCHED_OTHER; });
+  return { dates: dates, from: from, to: to, places: places };
+}
+
+/** 希望場所を検査してそろえる。places: 画面で選んだもの（配列）。何もなければ「どこでも」 */
+function normSchedPlace(list, other, places) {
+  list = (Array.isArray(list) ? list : String(list || '').split(',')).map(function (x) { return String(x).trim(); }).filter(String);
+  var seen = {}, out = [];
+  list.forEach(function (x) { if (!seen[x]) { seen[x] = 1; out.push(x); } });
+  if (!out.length) out = [SCHED_ANY_PLACE];
+  if (out.indexOf(SCHED_ANY_PLACE) >= 0 && out.length > 1) throw new Error('「どこでも」はほかの場所と同時に選べません');
+  out.forEach(function (x) {
+    if (x !== SCHED_ANY_PLACE && x !== SCHED_OTHER && places.indexOf(x) < 0) throw new Error('希望場所が選択肢にありません: ' + x);
+  });
+  // 並びは選択肢の順にそろえる（同じ内容なら同じ文字になるように）
+  var order = places.concat([SCHED_OTHER]);
+  if (out[0] !== SCHED_ANY_PLACE) out.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
+  var o = String(other || '').trim();
+  if (out.indexOf(SCHED_OTHER) >= 0) {
+    if (!o) throw new Error('「その他」の場所を入力してください');
+    if (o.length > SCHED_OTHER_MAX) throw new Error('「その他」の場所は' + SCHED_OTHER_MAX + '文字までです');
+  } else o = '';
+  return { place: out.join(','), place_other: safeText_(o) };
+}
+
+/** 数式として解釈されないように（= + - @ で始まる文字の先頭に ' を付ける） */
+function safeText_(s) { s = String(s || ''); return /^[=+\-@]/.test(s) ? "'" + s : s; }
+function unsafeText_(s) { s = String(s === undefined || s === null ? '' : s); return /^'[=+\-@]/.test(s) ? s.slice(1) : s; }
+
+function readSchedule_() {
+  if (!sheetExists_(SHEET.schedule)) return [];
+  return readTable_(SHEET.schedule).map(function (r) {
+    return { player_id: String(r.player_id).trim(), date: schedDate_(r.date), hour: Number(r.hour),
+             place: String(r.place || SCHED_ANY_PLACE), place_other: unsafeText_(r.place_other),
+             format: SCHED_FORMATS.indexOf(String(r.format)) >= 0 ? String(r.format) : 'どちらでも',
+             comment: unsafeText_(r.comment), created_at: toTime_(r.created_at), updated_at: toTime_(r.updated_at), device: String(r.device || '') };
+  }).filter(function (r) { return r.player_id && r.date && !isNaN(r.hour); });
+}
+
+/** 日程タブに渡すデータ */
+function scheduleState_() {
+  var cfg = readSettings_(), sc = schedConfig_(cfg), inRange = {};
+  sc.dates.forEach(function (d) { inRange[d] = 1; });
+  return {
+    now: Date.now(),
+    dates: sc.dates, day_start: sc.from, day_end: sc.to, places: sc.places,
+    slots: readSchedule_().filter(function (r) { return inRange[r.date]; }).map(function (r) {
+      return { p: r.player_id, d: r.date, h: r.hour, place: r.place, other: r.place_other, format: r.format, comment: r.comment, c: r.created_at, u: r.updated_at };
+    })
+  };
+}
+
+/**
+ * 参加の登録・取り消しの中身（シートに依存しない。テスト対象）
+ * rows: 今の全参加。p: 画面から来た内容。返り値: { rows: 新しい全参加, added, updated, removed, skipped }
+ *  schedSet:   p = { player_id, items: [{date, hour}], remove: [{date, hour}], place: [..], place_other, format, comment, skip_existing }
+ *  schedLeave: p = { player_id, items: [{date, hour}] }
+ */
+function applySchedule(action, rows, p, players, cfg, now, device) {
+  var sc = schedConfig_(cfg);
+  var pid = String(p.player_id || '').trim();
+  var pl = players.filter(function (x) { return x.player_id === pid; })[0];
+  if (!pl) throw new Error('選手が見つかりません。名前を選び直してください');
+  if (pl.active === false) throw new Error('参加中ではない選手です');
+  function slots(list) {
+    if (!Array.isArray(list)) return [];
+    var seen = {}, out = [];
+    list.forEach(function (it) {
+      var d = schedDate_(it && it.date), h = Number(it && it.hour);
+      if (!d || sc.dates.indexOf(d) < 0) throw new Error('期間外の日です: ' + (it && it.date));
+      if (!(h % 1 === 0 && h >= sc.from && h <= sc.to)) throw new Error('時間割の外の時間です: ' + (it && it.hour) + '時台');
+      if (slotStart_(d, h) + 3600000 <= now) throw new Error('過ぎた時間は変えられません（' + Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) + ' ' + h + '時台）');
+      var k = d + ' ' + h;
+      if (!seen[k]) { seen[k] = 1; out.push({ date: d, hour: h, key: k }); }
+    });
+    return out;
+  }
+  var items = slots(p.items), remove = action === 'schedSet' ? slots(p.remove) : [];
+  if (!items.length && !remove.length) throw new Error('時間が選ばれていません');
+  if (items.length + remove.length > SCHED_MAX_PER_CALL) throw new Error('1回に変えられるのは' + SCHED_MAX_PER_CALL + '時間までです');
+  var keyOf = function (r) { return r.player_id + '|' + r.date + ' ' + r.hour; };
+  var index = {};
+  rows.forEach(function (r, i) { index[keyOf(r)] = i; });
+  var res = { added: 0, updated: 0, removed: 0, skipped: 0 };
+  var out = rows.slice(), drop = {};
+  if (action === 'schedLeave') {
+    items.forEach(function (s) { var i = index[pid + '|' + s.key]; if (i !== undefined) { drop[i] = 1; res.removed++; } });
+  } else {
+    var place = normSchedPlace(p.place, p.place_other, sc.places);
+    var format = String(p.format || 'どちらでも');
+    if (SCHED_FORMATS.indexOf(format) < 0) throw new Error('希望形式が正しくありません: ' + format);
+    var comment = String(p.comment || '').trim();
+    if (comment.length > SCHED_COMMENT_MAX) throw new Error('ひとことは' + SCHED_COMMENT_MAX + '文字までです');
+    var keep = {};
+    items.forEach(function (s) { keep[s.key] = 1; });
+    remove.forEach(function (s) {
+      if (keep[s.key]) return;
+      var i = index[pid + '|' + s.key]; if (i !== undefined) { drop[i] = 1; res.removed++; }
+    });
+    items.forEach(function (s) {
+      var i = index[pid + '|' + s.key];
+      var vals = { place: place.place, place_other: place.place_other, format: format, comment: safeText_(comment), updated_at: new Date(now), device: device };
+      if (i !== undefined) {
+        if (p.skip_existing) { res.skipped++; return; }
+        var o = {}; Object.keys(out[i]).forEach(function (k) { o[k] = out[i][k]; });
+        Object.keys(vals).forEach(function (k) { o[k] = vals[k]; });
+        out[i] = o; res.updated++;
+      } else {
+        var n = { player_id: pid, date: s.date, hour: s.hour, created_at: new Date(now) };
+        Object.keys(vals).forEach(function (k) { n[k] = vals[k]; });
+        out.push(n); res.added++;
+      }
+    });
+  }
+  out = out.filter(function (r, i) { return !drop[i]; });
+  var mine = out.filter(function (r) { return r.player_id === pid; }).length;
+  if (mine > SCHED_MAX_PER_PLAYER) throw new Error('1人が参加できるのは' + SCHED_MAX_PER_PLAYER + '時間までです（いま' + (mine - res.added) + '時間）');
+  res.rows = out;
+  return res;
+}
+
+/** 参加の登録・取り消し（シートを書き換える） */
+function schedWrite_(action, p) {
+  var cfg = readSettings_(), players = readPlayers_();
+  var device = deviceLabel_(p.device);
+  if (!sheetExists_(SHEET.schedule)) { // setup を実行していなくても使えるように、初めての書き込みで作る
+    var nsh = ss_().insertSheet(SHEET.schedule);
+    nsh.getRange(1, 1, 1, HEADERS.schedule.length).setValues([HEADERS.schedule]).setFontWeight('bold');
+    nsh.setFrozenRows(1);
+  }
+  var sh = sheet_(SHEET.schedule);
+  var before = readSchedule_().map(function (r) {
+    // 書き戻すときに、読んだ値（数式よけの ' 付き）のままにする
+    r.place_other = safeText_(r.place_other); r.comment = safeText_(r.comment);
+    r.created_at = isNaN(r.created_at) ? '' : new Date(r.created_at); r.updated_at = isNaN(r.updated_at) ? '' : new Date(r.updated_at);
+    return r;
+  });
+  var res = applySchedule(action, before, p, players, cfg, Date.now(), device);
+  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  var oldLast = sh.getLastRow();
+  var values = res.rows.map(function (r) { return head.map(function (h) { return r[h] === undefined || r[h] === null ? '' : r[h]; }); });
+  sh.getRange('B:B').setNumberFormat('@');
+  if (values.length) sh.getRange(2, 1, values.length, head.length).setValues(values);
+  var extra = oldLast - 1 - values.length;
+  if (extra > 0) sh.getRange(values.length + 2, 1, extra, head.length).setValues(Array.apply(null, Array(extra)).map(function () { return head.map(function () { return ''; }); }));
+  var items = (p.items || []).map(function (it) { return schedDate_(it.date).slice(5) + ' ' + it.hour; });
+  log_(action, device, { player_id: p.player_id, items: items.join(','), added: res.added, updated: res.updated, removed: res.removed, skipped: res.skipped });
+  var st = scheduleState_();
+  st.result = { added: res.added, updated: res.updated, removed: res.removed, skipped: res.skipped };
+  return st;
+}
+
+/* =====================================================================
  *  ウェブアプリの入口
  * ===================================================================== */
 
@@ -1268,6 +1474,9 @@ function setup() {
   }
   // 日時列の表示形式
   ss.getSheetByName(SHEET.matches).getRange('B:C').setNumberFormat('yyyy/mm/dd hh:mm:ss');
+  // 日程の日付は文字のまま保存する（日付に変換されないように）
+  ss.getSheetByName(SHEET.schedule).getRange('B:B').setNumberFormat('@');
+  ss.getSheetByName(SHEET.schedule).getRange('H:I').setNumberFormat('yyyy/mm/dd hh:mm:ss');
   // players の初期レート列の説明
   var pl = ss.getSheetByName(SHEET.players);
   pl.getRange('C1').setNote('空欄なら settings の initial_rating（1500）。前回参加者は 1500＋(前回最終−1500)/4（1500未満なら1500）を運営が入力');
