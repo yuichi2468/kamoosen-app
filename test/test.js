@@ -80,6 +80,13 @@ t('参考レートは前の試合の参考レートで次を計算し、相手�
   // m3: 参考の自チーム平均 (1732+1542)/2=1637 vs (1500+1525)/2=1512.5 → 差124.5 → +24-7.47=16.53→17
   eq(r.virtual.A, 1749);
 });
+t('参考レートの開始値を設定すると、その値から変動する（公式は変わらない）', () => {
+  const m = [{ match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }];
+  const r = G.computeRatings(players, m, Object.assign({}, cfg, { virtual_initial_rating: 1500 }));
+  // 1500 同士 → A は -20
+  eq([r.ratings.A, r.virtual.A, r.ratings.p1], [1800, 1480, 1542]);
+  eq(G.computeRatings(players, m, Object.assign({}, cfg, { virtual_initial_rating: '' })).virtual.A, 1765);
+});
 t('参考レートはレート固定の人だけ', () => {
   const r = G.computeRatings(players, [], cfg);
   eq(Object.keys(r.virtual), ['A']); eq(r.virtual.A, 1800);
@@ -208,6 +215,13 @@ t('参考レートの表示は運営画面から切り替えられる（settings
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: true }); eq(r.ok, true, r.error);
   eq(r.data.players.find(p => p.id === 'A').virtual_rating, 1765);
   eq(st.data.filter(row => row[0] === 'virtual_rating_visible').map(row => row[1]), [true]);
+  // 開始値: 0〜5000 の整数だけ。空欄で固定レートに戻る
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_initial_rating', value: '15.5' }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_initial_rating', value: '9999' }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_initial_rating', value: '1500' }); eq(r.ok, true, r.error);
+  eq([r.data.settings.virtual_initial_rating, r.data.players.find(p => p.id === 'A').virtual_rating, r.data.players.find(p => p.id === 'A').rating], [1500, 1480, 1800]);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_initial_rating', value: '' }); eq(r.ok, true, r.error);
+  eq([r.data.settings.virtual_initial_rating, r.data.players.find(p => p.id === 'A').virtual_rating], [null, 1765]);
 });
 t('締切前に開始した試合は 21:00 以降も結果入力できる', () => {
   const g = loadGas({ now: Date.parse('2026-12-07T20:59:00+09:00') });
