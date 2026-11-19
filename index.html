@@ -304,9 +304,18 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .schgrid td.past { background: #ecebe6; color: #9a9f9c; border-color: #ecebe6; }
 .schgrid td.past.mine { box-shadow: inset 0 0 0 2px #9a9f9c; }
 .schgrid td.now { outline: 2px solid var(--ink); outline-offset: 1px; }
-.schgrid td.sel { background: var(--ink); color: #fff; }
 .schgrid .ndot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); border: 1px solid #fff; }
-.schhint { margin: 8px 4px 0; font-size: 12px; }
+.schhint { margin: 8px 4px 8px; font-size: 12px; line-height: 1.5; }
+.schmode { display: flex; width: 100%; }
+.schmode button { flex: 1; padding: 8px 4px; font-size: 14px; }
+.schgrid td.sel { background: var(--ink); color: #fff; border-color: var(--ink); }
+.schgrid td.drag { background: var(--ink); color: #fff; }
+.schfoot.withbar { padding-bottom: 76px; }
+.schbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+.schbarin { max-width: 720px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.schbarin > span { font-size: 14px; }
+.schbarin [data-sselgo] { flex: 1; min-height: 46px; font-size: 17px; font-weight: 700; }
+.schsellist { font-size: 15px; line-height: 1.6; }
 .schfoot { text-align: center; margin-bottom: 14px; }
 .schov { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; justify-content: center; }
 .schsheet { background: var(--card); width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; border-radius: 14px 14px 0 0; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); }
@@ -1254,6 +1263,9 @@ var schBulk = null;   // まとめて追加 { dates: {}, from, to, place: [], ot
 var schSending = 0;
 var schBase = null;   // 新着の基準（前回閉じた時刻）
 var schCands = null;  // 「このメンバーで試合を始める」で渡した参加者 { ids, label }
+var schMode = 'pick'; // 'pick': タップで時間を選んでまとめて登録（標準） / 'view': タップで参加者を見る
+var schSel = {};      // 選んだ時間 { 'd h': 1 }
+var schFormTimer = null; // なぞったあと、少し間を空けて登録画面を出す
 var SCH_ANY = 'どこでも', SCH_OTHER = 'その他', SCH_FORMATS = ['個人戦', 'チーム戦', 'どちらでも'];
 var WD = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -1328,7 +1340,11 @@ function viewSched() {
   if (fresh.length) h += '<button class="schnew" data-snew="1">新着 ' + fresh.length + '件</button>';
   h += '</div>';
   h += schGrid(fresh);
-  h += '<div class="schfoot"><button class="btn ghost" data-sbulk="1"' + (schMe ? '' : ' disabled') + '>まとめて追加</button></div>';
+  var sel = schSelList(), selMine = sel.filter(function (x) { return schMine(x.d, x.h); });
+  h += '<div class="schfoot' + (sel.length ? ' withbar' : '') + '"><button class="btn ghost" data-sbulk="1"' + (schMe ? '' : ' disabled') + '>まとめて追加（日 × 時間帯）</button></div>';
+  if (sel.length && schMode === 'pick') h += '<div class="schbar"><div class="schbarin"><span><b>' + sel.length + '</b>時間を選択中</span>' +
+    '<button class="btn" data-sselgo="1">参加登録</button>' + (selMine.length ? '<button class="btn danger small" data-sselleave="1">参加をやめる（' + selMine.length + '）</button>' : '') +
+    '<button class="btn ghost small" data-sselclear="1">選択を外す</button></div></div>';
   if (schOpen) h += schDetail();
   else if (schForm) h += schFormView();
   else if (schBulk) h += schBulkView();
@@ -1341,7 +1357,11 @@ function schGrid(fresh) {
   if (schStart > max) schStart = Math.max(0, max);
   var ds = SCH.dates.slice(schStart, schStart + cols), busy = busySet(), dot = {};
   fresh.forEach(function (x) { dot[schKey(x.d, x.h)] = 1; });
-  var h = '<div class="card schcard"><div class="schnav"><button class="btn small ghost" data-sday="-' + cols + '"' + (schStart <= 0 ? ' disabled' : '') + '>‹</button>' +
+  var h = '<div class="card schcard"><div class="schmode seg"><button data-smode="pick" class="' + (schMode === 'pick' ? 'on' : '') + '">時間を選んで参加</button><button data-smode="view" class="' + (schMode === 'view' ? 'on' : '') + '">参加者を見る</button></div>';
+  h += '<p class="muted schhint">' + (schMode === 'pick'
+    ? '参加できる時間のマスをタップして選び（もう一度タップで外す）、下の「参加登録」でまとめて登録します。スマホは長押ししてからなぞると、続けて選べます。数字はその時間に参加している人数です。'
+    : 'マスをタップすると、その時間の参加者が見られます。自分の参加の編集・取り消しもここからできます。数字はその時間に参加している人数です。') + '</p>';
+  h += '<div class="schnav"><button class="btn small ghost" data-sday="-' + cols + '"' + (schStart <= 0 ? ' disabled' : '') + '>‹</button>' +
     '<span class="muted">' + dLabel(ds[0]) + ' 〜 ' + dLabel(ds[ds.length - 1]) + '</span>' +
     '<button class="btn small ghost" data-sday="' + cols + '"' + (schStart >= max ? ' disabled' : '') + '>›</button></div>';
   h += '<table class="schgrid" id="schGrid"><thead><tr><th class="schtime"></th>' + ds.map(function (d) { return '<th class="' + (dWeekend(d) ? 'we' : '') + '">' + dLabel(d) + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -1351,13 +1371,13 @@ function schGrid(fresh) {
       var k = schKey(d, hr), list = (SCH.by[k] || []).filter(schMatch), mine = !!schMine(d, hr), past = slotPast(d, hr), now = slotNow(d, hr);
       var cnt = schF.mine && !mine ? 0 : list.length;
       var playing = now ? list.filter(function (x) { return busy[x.p]; }).length : 0;
-      var cls = 'c' + Math.min(cnt, 2) + (mine ? ' mine' : '') + (past ? ' past' : '') + (now ? ' now' : '');
+      var cls = 'c' + Math.min(cnt, 2) + (mine ? ' mine' : '') + (past ? ' past' : '') + (now ? ' now' : '') + (schMode === 'pick' && schSel[k] && !past ? ' sel' : '');
       h += '<td class="' + cls + '" data-sd="' + d + '" data-sh="' + hr + '">' + (cnt ? '<b>' + cnt + '</b>' : '') +
         (playing && cnt ? '<small>試合中' + playing + '</small>' : '') + (dot[k] ? '<i class="ndot"></i>' : '') + '</td>';
     });
     h += '</tr>';
   });
-  h += '</tbody></table><p class="muted schhint">数字はその時間に参加している人数です。マスをタップで詳細、なぞると（スマホは長押ししてから）まとめて選べます。</p></div>';
+  h += '</tbody></table></div>';
   return h;
 }
 
@@ -1402,8 +1422,40 @@ function schPlaceEditor(f) {
 function schHourOpts(d, sel, minH) {
   return schHours().filter(function (h) { return h >= minH && !slotPast(d, h); }).map(function (h) { return '<option value="' + h + '"' + (h === sel ? ' selected' : '') + '>' + h + '時台</option>'; }).join('');
 }
+function schSelList() {
+  var out = [];
+  Object.keys(schSel).forEach(function (k) {
+    var m = k.split(' '), d = m[0], h = Number(m[1]);
+    if (!schSel[k] || slotPast(d, h) || SCH.dates.indexOf(d) < 0) { delete schSel[k]; return; }
+    out.push({ d: d, h: h });
+  });
+  return out.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : a.h - b.h; });
+}
+// 選んだ時間を「11/25(水) 18〜20時台」のようにまとめて書く
+function schSelText(list) {
+  var by = {}, out = [];
+  list.forEach(function (x) { (by[x.d] = by[x.d] || []).push(x.h); });
+  Object.keys(by).sort().forEach(function (d) {
+    var hs = by[d], parts = [], a = hs[0], z = hs[0];
+    for (var i = 1; i <= hs.length; i++) {
+      if (i < hs.length && hs[i] === z + 1) { z = hs[i]; continue; }
+      parts.push(a === z ? a + '時台' : a + '〜' + z + '時台');
+      if (i < hs.length) a = z = hs[i];
+    }
+    out.push('<div>' + dLabel(d) + ' ' + parts.join('、') + '</div>');
+  });
+  return out.join('');
+}
 function schFormView() {
   var f = schForm;
+  if (f.mode === 'sel') {
+    var list = schSelList(), ex = list.filter(function (x) { return schMine(x.d, x.h); }).length;
+    var bs = '<div class="schfld"><span>選んだ時間（' + list.length + '時間）</span><div class="schsellist">' + schSelText(list) + '</div>' +
+      (ex ? '<p class="muted" style="margin:4px 0 0">参加済みの' + ex + '時間は、この内容で上書きします。</p>' : '') + '</div>';
+    bs += schPlaceEditor(f);
+    bs += '<div class="schbtns"><button class="btn" data-ssave="1"' + (list.length ? '' : ' disabled') + '>参加する</button><button class="btn ghost" data-sclose="1">戻る</button></div>';
+    return schSheet('選んだ時間に参加', bs);
+  }
   var b = '<div class="schfld"><span>時間</span><div class="row"><select id="schFrom">' + schHourOpts(f.d, f.from, 0) + '</select> 〜 <select id="schTo">' + schHourOpts(f.d, f.to, f.from) + '</select></div></div>';
   b += schPlaceEditor(f);
   b += '<div class="schbtns"><button class="btn" data-ssave="1">' + (f.mode === 'edit' ? '保存' : '参加する') + '</button><button class="btn ghost" data-sclose="1">やめる</button></div>';
@@ -1470,7 +1522,7 @@ function schPayloadBase(f) {
 function schSend(action, payload, okMsg) {
   schSending++; showSendNotice();
   return call(action, payload).then(function (d) {
-    schSending--; schSet(d); schOpen = schForm = schBulk = null; render(); toast(okMsg(d.result || {})); return true;
+    schSending--; schSet(d); var msg = okMsg(d.result || {}); schOpen = schForm = schBulk = null; render(); toast(msg); return true;
   }).catch(function (e) { schSending--; showSendNotice(); toast(e.message || String(e), true); return false; });
 }
 // 「このメンバーで試合を始める」（案A）: 2人ならそのまま1vs1で入れ、3人以上なら選手選びで上に出す
@@ -1488,22 +1540,37 @@ function schToPlay(ids, label) {
 var schDrag = null, schSkipClick = false;
 function schCellAt(x, y) { var el = document.elementFromPoint(x, y); return el && el.closest ? el.closest('#schGrid td[data-sd]') : null; }
 function schMark() {
-  document.querySelectorAll('#schGrid td.sel').forEach(function (td) { td.classList.remove('sel'); });
+  document.querySelectorAll('#schGrid td.drag').forEach(function (td) { td.classList.remove('drag'); });
   if (!schDrag || !schDrag.on) return;
   var a = Math.min(schDrag.h0, schDrag.h1), z = Math.max(schDrag.h0, schDrag.h1);
-  document.querySelectorAll('#schGrid td[data-sd="' + schDrag.d + '"]').forEach(function (td) { var h = Number(td.dataset.sh); if (h >= a && h <= z && !td.classList.contains('past')) td.classList.add('sel'); });
+  document.querySelectorAll('#schGrid td[data-sd="' + schDrag.d + '"]').forEach(function (td) { var h = Number(td.dataset.sh); if (h >= a && h <= z && !td.classList.contains('past')) td.classList.add('drag'); });
 }
 function schDragEnd() {
   if (!schDrag) return;
   var dr = schDrag; schDrag = null; clearTimeout(dr.timer); schMark();
   if (!dr.on) return;
   schSkipClick = true; setTimeout(function () { schSkipClick = false; }, 400);
-  if (dr.h0 === dr.h1) { schOpenSlot(dr.d, dr.h0); return; }
-  schNewForm(dr.d, Math.min(dr.h0, dr.h1), Math.max(dr.h0, dr.h1));
+  if (schMode === 'view') { // 参加者を見るモード: なぞった範囲で入力画面を開く
+    if (dr.h0 === dr.h1) { schOpenSlot(dr.d, dr.h0); return; }
+    schFormTimer = setTimeout(function () { schFormTimer = null; schNewForm(dr.d, Math.min(dr.h0, dr.h1), Math.max(dr.h0, dr.h1)); }, 600);
+    return;
+  }
+  // 時間を選ぶモード: なぞった範囲を選択に加え、選んだ範囲が見えるように少し間を空けてから登録画面を出す
+  for (var h = Math.min(dr.h0, dr.h1); h <= Math.max(dr.h0, dr.h1); h++) if (!slotPast(dr.d, h)) schSel[schKey(dr.d, h)] = 1;
+  render();
+  if (!schMe) return;
+  schFormTimer = setTimeout(function () { schFormTimer = null; if (tab === 'sched' && schSelList().length && !schForm && !schOpen && !schBulk) schSelForm(); }, 600);
+}
+function schSelForm() {
+  if (!schMe) { toast('先に自分の名前を選んでください', true); return; }
+  schOpen = schBulk = null;
+  schForm = { mode: 'sel', place: [], other: '', format: 'どちらでも', comment: '' };
+  render();
 }
 var mainEl = document.getElementById('main');
 mainEl.addEventListener('mousedown', function (e) {
   var td = e.target.closest && e.target.closest('#schGrid td[data-sd]'); if (!td || e.button !== 0) return;
+  clearTimeout(schFormTimer); schFormTimer = null;
   schDrag = { d: td.dataset.sd, h0: Number(td.dataset.sh), h1: Number(td.dataset.sh), on: false, mouse: true };
 });
 document.addEventListener('mousemove', function (e) {
@@ -1515,6 +1582,7 @@ document.addEventListener('mouseup', function () { if (schDrag && schDrag.mouse)
 mainEl.addEventListener('touchstart', function (e) {
   var td = e.target.closest && e.target.closest('#schGrid td[data-sd]'); if (!td || e.touches.length !== 1) return;
   var t0 = e.touches[0];
+  clearTimeout(schFormTimer); schFormTimer = null;
   schDrag = { d: td.dataset.sd, h0: Number(td.dataset.sh), h1: Number(td.dataset.sh), on: false, x: t0.clientX, y: t0.clientY };
   schDrag.timer = setTimeout(function () { if (schDrag) { schDrag.on = true; schMark(); if (navigator.vibrate) try { navigator.vibrate(15); } catch (er) {} } }, 400);
 }, { passive: true });
@@ -1544,12 +1612,28 @@ mainEl.addEventListener('click', function (e) {
   if (tab !== 'sched' && !e.target.closest('[data-schcands]')) return;
   var c = e.target.closest('[data-schcands]');
   if (c) { e.preventDefault(); schCands = null; render(); return; }
-  var t = e.target.closest('td[data-sd],[data-snew],[data-sday],[data-sbulk],[data-sclose],[data-sjoin],[data-sedit],[data-sleave],[data-splay],[data-splace],[data-sformat],[data-ssave],[data-sq],[data-sbd],[data-sbsave]');
+  var t = e.target.closest('td[data-sd],[data-smode],[data-sselgo],[data-sselleave],[data-sselclear],[data-snew],[data-sday],[data-sbulk],[data-sclose],[data-sjoin],[data-sedit],[data-sleave],[data-splay],[data-splace],[data-sformat],[data-ssave],[data-sq],[data-sbd],[data-sbsave]');
   if (!t) return;
   var d = t.dataset;
   if (d.sclose !== undefined && t.classList.contains('schov') && e.target !== t) return; // シートの中の操作は閉じない
   e.preventDefault();
-  if (d.sd) { if (schSkipClick) return; schOpenSlot(d.sd, Number(d.sh)); return; }
+  if (d.sd) {
+    if (schSkipClick) return;
+    if (schMode === 'view') { schOpenSlot(d.sd, Number(d.sh)); return; }
+    if (t.classList.contains('past')) { schOpenSlot(d.sd, Number(d.sh)); return; } // 過ぎた時間は選べないので、参加者を見せる
+    var sk = schKey(d.sd, Number(d.sh));
+    if (schSel[sk]) delete schSel[sk]; else schSel[sk] = 1;
+    render(); return;
+  }
+  if (d.smode) { schMode = d.smode; render(); return; }
+  if (d.sselgo) { schSelForm(); return; }
+  if (d.sselclear) { schSel = {}; render(); return; }
+  if (d.sselleave) {
+    var lv = schSelList().filter(function (x) { return schMine(x.d, x.h); });
+    if (!t.dataset.sure) { t.dataset.sure = 1; t.textContent = 'もう一度押すと取り消し（' + lv.length + '）'; return; }
+    schSend('schedLeave', { player_id: schMe, items: lv.map(function (x) { return { date: x.d, hour: x.h }; }), device: deviceId() }, function (r) { schSel = {}; return (r.removed || 0) + '時間の参加をやめました'; });
+    return;
+  }
   if (d.snew) { var fr = schFresh()[0]; if (fr) { var i = SCH.dates.indexOf(fr.d), cols = schCols(); if (i < schStart || i >= schStart + cols) schStart = i; schOpenSlot(fr.d, fr.h); } return; }
   if (d.sday) { schStart = Math.max(0, schStart + Number(d.sday)); render(); return; }
   if (d.sclose) { schOpen = schForm = schBulk = null; render(); return; }
@@ -1572,6 +1656,12 @@ mainEl.addEventListener('click', function (e) {
     render(); return;
   }
   if (d.sformat && f) { schPayloadBase(f); f.format = d.sformat; render(); return; }
+  if (d.ssave && schForm.mode === 'sel') {
+    var ps = schPayloadBase(schForm);
+    ps.items = schSelList().map(function (x) { return { date: x.d, hour: x.h }; });
+    schSend('schedSet', ps, function (r) { schSel = {}; return ((r.added || 0) + (r.updated || 0)) + '時間に参加しました'; });
+    return;
+  }
   if (d.ssave) {
     var p = schPayloadBase(schForm), items = [];
     for (var h2 = schForm.from; h2 <= schForm.to; h2++) items.push({ date: schForm.d, hour: h2 });
@@ -1685,7 +1775,7 @@ setInterval(function () {
   if (document.visibilityState !== 'visible' || syncing) return;
   if (scoringId && LC[scoringId] && LC[scoringId].ver > LC[scoringId].sentVer) { queueSync(true); return; } // 未送信があれば再送
   if (scoringId || document.activeElement.matches('input,select')) return; // 入力中は画面を書き換えない
-  if (tab === 'sched' && (schOpen || schForm || schBulk || schDrag)) return; // 日程の入力中・詳細を開いている間は書き換えない
+  if (tab === 'sched' && (schOpen || schForm || schBulk || schDrag || schFormTimer)) return; // 日程の入力中・詳細を開いている間は書き換えない
   call('state').then(function (d) { S = d; render(); }).catch(function () {});
   if (tab === 'sched') loadSched();
 }, 30000);
