@@ -123,17 +123,21 @@ function pairKey_(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
  * 全試合からレートを再計算する
  * players: [{player_id, name, initial_rating, fixed_rating, active}]
  * matches: [{match_id, started_at, team1_ids, team2_ids, winner, status}]
- * 戻り値: { ratings, stats, deltas, history, singlesCount }
+ * 戻り値: { ratings, fixed, stats, deltas, history, singlesCount, virtual, virtualHistory }
+ * virtual: レート固定の人が「ほかの人と同じように変動した場合」のレート（参考値）。
+ *   固定レートから始め、各試合で自分のチーム平均だけを参考レートに置き換えて増減を計算する。
+ *   公式のレート（ratings）と相手側の計算には一切影響しない。
  */
 function computeRatings(players, matches, cfg) {
   cfg = cfg || {};
   var base = num_(cfg.initial_rating, 1500);
-  var ratings = {}, fixed = {}, stats = {}, history = {};
+  var ratings = {}, fixed = {}, stats = {}, history = {}, virtual = {}, virtualHistory = {};
   players.forEach(function (p) {
     var id = String(p.player_id);
     var fr = p.fixed_rating;
     if (fr !== '' && fr !== null && fr !== undefined && !isNaN(Number(fr))) fixed[id] = Number(fr);
     ratings[id] = fixed[id] !== undefined ? fixed[id] : num_(p.initial_rating, base);
+    if (fixed[id] !== undefined) { virtual[id] = fixed[id]; virtualHistory[id] = []; }
     stats[id] = { matches: 0, team_matches: 0, wins: 0, losses: 0 };
     history[id] = [];
   });
@@ -158,6 +162,19 @@ function computeRatings(players, matches, cfg) {
     var d = w === 1 ? computeDelta(a1, a2, cfg) : computeDelta(a2, a1, cfg);
     var d1 = w === 1 ? d.gain : -d.loss, d2 = w === 1 ? -d.loss : d.gain;
     var isTeam = !(t1.length === 1 && t2.length === 1);
+    // レート固定の人の参考レート: 自分のチーム平均だけ参考レートで計算し直す（公式の計算は変えない）
+    var shadow = function (team, opp, won) {
+      team.forEach(function (id) {
+        if (fixed[id] === undefined) return;
+        var own = team.reduce(function (s, x) { return s + (x === id ? virtual[id] : ratings[x]); }, 0) / team.length;
+        var vd = computeDelta(won ? own : avg(opp), won ? avg(opp) : own, cfg);
+        var dv = won ? vd.gain : -vd.loss;
+        virtual[id] += dv;
+        virtualHistory[id].push({ match_id: m.match_id, at: toTime_(m.started_at), delta: dv, rating: virtual[id] });
+      });
+    };
+    shadow(t1, t2, w === 1);
+    shadow(t2, t1, w === 2);
     var apply = function (team, delta, won) {
       team.forEach(function (id) {
         if (fixed[id] === undefined) ratings[id] += delta;
@@ -183,7 +200,8 @@ function computeRatings(players, matches, cfg) {
     }
   });
 
-  return { ratings: ratings, fixed: fixed, stats: stats, deltas: deltas, history: history, singlesCount: singlesCount };
+  return { ratings: ratings, fixed: fixed, stats: stats, deltas: deltas, history: history, singlesCount: singlesCount,
+           virtual: virtual, virtualHistory: virtualHistory };
 }
 
 /**
@@ -1095,6 +1113,7 @@ function publicState_() {
     settings: pubCfg,
     players: players.map(function (p) {
       return { id: p.player_id, name: String(p.name), rating: res.ratings[p.player_id], fixed: res.fixed[p.player_id] !== undefined,
+               virtual_rating: res.virtual[p.player_id], // レート固定の人だけ。変動した場合の参考値
                active: p.active !== false, stats: res.stats[p.player_id] };
     }),
     ranking: ranking,
@@ -1118,6 +1137,7 @@ function publicState_() {
     profiles: computeProfiles(players, matches),
     awards: awardsVisible_(cfg) ? computeAwards(players, matches, res, ranking, cfg) : null,
     history: res.history,
+    virtual_history: res.virtualHistory,
     singles: res.singlesCount
   };
 }

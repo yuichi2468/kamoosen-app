@@ -149,7 +149,7 @@ GitHub Actions の Secrets に `GAS_DEPLOYMENT_ID` が入っていることが�
 Node.js があれば、手元でレート計算と画面の動作を確認できます。
 
 ```
-node test/test.js          # レート計算・1投ごとの点数計算・入力チェック・シート連携のテスト（45件）
+node test/test.js          # レート計算・1投ごとの点数計算・入力チェック・シート連携のテスト
 node test/build.js         # engine.js を直したとき、Code.gs と index.html に反映する
 node test/ui-test.js       # 画面をブラウザで操作して確認（Playwright が必要）
 ```

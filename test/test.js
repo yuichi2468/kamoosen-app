@@ -59,6 +59,31 @@ t('A を含むチームは A を1800として平均', () => {
   const r = G.computeRatings(players, m, cfg); // 平均1650 vs 1500 → +15 / -(20-7.5)=12.5→13
   eq([r.ratings.A, r.ratings.p1, r.ratings.p3], [1800, 1515, 1487]);
 });
+t('参考レート: 1500 に負けた A は、1800 から変動した場合 -35（公式は1800のまま）', () => {
+  const m = [{ match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }];
+  const r = G.computeRatings(players, m, cfg);
+  eq([r.ratings.A, r.virtual.A, r.ratings.p1], [1800, 1765, 1542]); // -(20+300*0.05)=-35
+  eq(r.virtualHistory.A, [{ match_id: 'm1', at: 1, delta: -35, rating: 1765 }]);
+  eq(r.history.A[0].delta, 0);
+});
+t('参考レートは前の試合の参考レートで次を計算し、相手の増減は変えない', () => {
+  // m1: A が p1 に負け → 参考1765。m2: A(参考1765) が p3 に負け → -(20+265*0.05)=-33.25→-33 → 1732
+  const ms = [
+    { match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' },
+    { match_id: 'm2', started_at: 2, team1_ids: 'p3', team2_ids: 'A', winner: 1, status: 'done' },
+    { match_id: 'm3', started_at: 3, team1_ids: 'A,p1', team2_ids: 'p4,p2', winner: 1, status: 'done' },
+  ];
+  const r = G.computeRatings(players, ms, cfg);
+  // 公式のレート（相手・味方を含む）は参考レートの計算があっても今までどおり（変更前のコードと同じ値）
+  eq([r.ratings.A, r.ratings.p1, r.ratings.p3, r.ratings.p4, r.ratings.p2], [1800, 1556, 1542, 1488, 1513]);
+  eq(r.virtualHistory.A.map(x => x.rating).slice(0, 2), [1765, 1732]);
+  // m3: 参考の自チーム平均 (1732+1542)/2=1637 vs (1500+1525)/2=1512.5 → 差124.5 → +24-7.47=16.53→17
+  eq(r.virtual.A, 1749);
+});
+t('参考レートはレート固定の人だけ', () => {
+  const r = G.computeRatings(players, [], cfg);
+  eq(Object.keys(r.virtual), ['A']); eq(r.virtual.A, 1800);
+});
 t('開始時刻順に計算（入力順が逆でも同じ）', () => {
   const m1 = { match_id: 'm1', started_at: T('2026-11-25T10:00:00+09:00'), team1_ids: 'p1', team2_ids: 'p3', winner: 1, status: 'done' };
   const m2 = { match_id: 'm2', started_at: T('2026-11-25T11:00:00+09:00'), team1_ids: 'p1', team2_ids: 'p4', winner: 2, status: 'done' };

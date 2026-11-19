@@ -522,8 +522,16 @@ function viewRank() {
   h += '</tbody></table></div>';
   h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。色付きの行が通過圏内（上位' + q + '名）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 20) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
-  if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + p.stats.matches + '試合 ' + p.stats.wins + '勝' + p.stats.losses + '敗</p>'; }).join('') + '</div>';
+  if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + p.stats.matches + '試合 ' + p.stats.wins + '勝' + p.stats.losses + '敗' +
+    (p.virtual_rating !== undefined && p.virtual_rating !== null ? '<br><span class="muted">変動した場合のレート（参考）: ' + p.virtual_rating + '</span>' : '') + '</p>'; }).join('') + '</div>';
   return h;
+}
+
+// レート固定の人が、ほかの人と同じように変動した場合のレート（参考値。公式のレートや順位には使わない）
+function virtualLine(p) {
+  if (!p.fixed || p.virtual_rating === undefined || p.virtual_rating === null) return '';
+  var d = p.virtual_rating - p.rating;
+  return '<div class="heroproj"><span class="muted">変動した場合（参考）</span> <b>' + p.virtual_rating + '</b> <span class="muted">（' + (d > 0 ? '+' : '') + d + '）</span></div>';
 }
 
 function quotaCell(have, need) { return have < need ? '<b class="short">' + have + '</b>' : '<b class="met">' + have + '<small>✓</small></b>'; }
@@ -1011,7 +1019,7 @@ function viewMe() {
   h += '<div class="card hero"><div class="muted herotop">' + (p.fixed ? '前回王者（予選の順位対象外）' : r ? '予選 ' + (r.eligible ? '' : '暫定') + r.rank + '位 / ' + S.ranking.length + '名中' : '') + '</div>' +
     '<div class="heroname">' + esc(p.name) + '</div>' +
     (r ? '<div class="herorate"><span class="muted">合計</span> <b>' + r.total + '</b></div><div class="heroproj"><span class="muted">レート</span> ' + r.rating + ' <span class="muted">＋ボーナス</span> <b>' + (r.bonus < 0 ? r.bonus : '+' + r.bonus) + '</b>' + '</div>'
-         : '<div class="herorate"><span class="muted">レート</span> <b>' + p.rating + '</b>' + (p.fixed ? ' <span class="badge">固定</span>' : '') + '</div>');
+         : '<div class="herorate"><span class="muted">レート</span> <b>' + p.rating + '</b>' + (p.fixed ? ' <span class="badge">固定</span>' : '') + '</div>' + virtualLine(p));
   var mine = myAwards(id);
   if (mine.length) h += '<div class="herobadges">' + mine.map(function (x) { return '<span class="badge award-b r' + x.rank + (x.prov ? ' prov' : '') + '">' + (['🎖', '🥇', '🥈', '🥉'][x.rank] || '🏅') + ' ' + esc(x.text) + '</span>'; }).join('') + '</div>';
   h += '</div>';
@@ -1043,8 +1051,9 @@ function viewMe() {
 
   // 6. 折りたたみの欄（最初は閉じる。開いた状態は端末ごとに覚える）
   var sec = function (key, title, body) { return body ? '<details class="card sec" data-sec="' + key + '"' + (secOpen(key) ? ' open' : '') + '><summary>' + title + '</summary>' + body + '</details>' : ''; };
-  var hist = S.history[id] || [], body = '';
-  if (hist.length && !p.fixed) {
+  // レート固定の人は「変動した場合」の参考レートの推移を出す
+  var hist = (p.fixed ? (S.virtual_history || {})[id] : S.history[id]) || [], body = '';
+  if (hist.length) {
     var pts = [hist[0].rating - hist[0].delta].concat(hist.map(function (x) { return x.rating; }));
     var lo0 = Math.min.apply(null, pts), hi0 = Math.max.apply(null, pts);
     // 目盛り: 10・20・25・50・100 のうち、線が3〜6本になる間隔
@@ -1069,7 +1078,8 @@ function viewMe() {
     body = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '">' + grid + '<polyline fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" points="' + chartLine + '"/>' + dots + '</svg>' +
       '<div class="row muted" style="justify-content:space-between"><span>最低 ' + lo0 + '</span><span>最高 ' + hi0 + '</span></div>';
   }
-  var secChart = sec('chart', 'レート推移', body);
+  if (body && p.fixed) body = '<p class="muted">レートは ' + p.rating + ' で固定です。これは、ほかの人と同じように変動した場合の参考の推移です。</p>' + body;
+  var secChart = sec('chart', p.fixed ? 'レート推移（変動した場合・参考）' : 'レート推移', body);
   var ts = S.throw_stats && S.throw_stats[id];
   var secThrows = sec('throws', '投擲成績', ts && ts.throws ? '<p class="muted">個人の投擲順を入れて1投ごとに記録した試合の集計です</p><div class="stat"><div><span class="muted">ヒット率</span><b>' + ts.hit_rate + '%</b><small class="muted">' + (ts.hits !== undefined ? ts.hits : ts.throws - ts.misses) + '/' + ts.throws + '</small></div><div><span class="muted">投擲数</span><b>' + ts.throws + '</b></div><div><span class="muted">上がり</span><b>' + ts.wins + '</b><small class="muted">合計 ' + ts.points + '点</small></div></div>' : '<p class="muted">まだ記録がありません</p>');
   var ss1 = S.singles_stats && S.singles_stats[id];
