@@ -186,6 +186,29 @@ t('初期設定 → 開始 → 結果 → 確認 → ランキングシート', 
   g.__setNow(Date.parse('2026-12-07T21:00:00+09:00'));
   r = g.api('start', { team1: ['p3'], team2: ['A']}); eq(r.ok, false); eq(r.error, '試合開始の締切を過ぎています');
 });
+t('参考レートの表示は運営画面から切り替えられる（settings に行が無くても足す）', () => {
+  const g = loadGas();
+  g.setup();
+  g.__sheets.players.appendRow(['A', '王者', '', 1800, true]);
+  g.__sheets.players.appendRow(['p1', 'あ', '', '', true]);
+  let r = g.api('start', { team1: ['p1'], team2: ['A'] }); eq(r.ok, true, r.error);
+  r = g.api('result', { match_id: r.data.matches[0].id, team1_legs: 2, team2_legs: 0 }); eq(r.ok, true, r.error);
+  let a = r.data.players.find(p => p.id === 'A');
+  eq([a.rating, a.virtual_rating, r.data.settings.virtual_rating_visible], [1800, 1765, true]);
+  eq(r.data.virtual_history.A.length, 1);
+  // 既存のシートで行が無い場合も、運営画面から切り替えると行が足される
+  const st = g.__sheets.settings;
+  const i = st.data.findIndex(row => row[0] === 'virtual_rating_visible'); st.data.splice(i, 1);
+  r = g.api('adminSetting', { admin_key: 'x', key: 'virtual_rating_visible', value: false }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'admin_key', value: false }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: false }); eq(r.ok, true, r.error);
+  a = r.data.players.find(p => p.id === 'A');
+  eq([a.rating, a.virtual_rating === undefined ? null : a.virtual_rating, r.data.settings.virtual_rating_visible, r.data.virtual_history], [1800, null, false, {}]);
+  eq(st.data.filter(row => row[0] === 'virtual_rating_visible').map(row => row[1]), [false]);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: true }); eq(r.ok, true, r.error);
+  eq(r.data.players.find(p => p.id === 'A').virtual_rating, 1765);
+  eq(st.data.filter(row => row[0] === 'virtual_rating_visible').map(row => row[1]), [true]);
+});
 t('締切前に開始した試合は 21:00 以降も結果入力できる', () => {
   const g = loadGas({ now: Date.parse('2026-12-07T20:59:00+09:00') });
   g.setup();

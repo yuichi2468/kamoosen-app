@@ -1153,6 +1153,11 @@ function viewAdmin() {
     return h + '<p class="muted">運営パスワードを入れてください（スプレッドシートの settings シートの admin_key）。</p><div class="row"><input type="password" id="adminKey"><button class="btn" id="adminLogin">入る</button></div></div>';
   }
   h += '<div class="row"><button class="btn" id="adminRecalc">レート再計算</button><span class="muted">シートを直接直したあとに押してください</span></div></div>';
+  var vOn = S.settings.virtual_rating_visible !== false;
+  h += '<div class="card"><h2>表示の設定</h2><div class="row"><span><b>レート固定の人の参考レート</b><br><span class="muted">ほかの人と同じように変動した場合のレート（個人ページ・ランキングのレイドバトル欄）</span></span>' +
+    '</div><div class="row" style="margin-top:6px">' + (vOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
+    '<button class="btn small' + (vOn ? ' ghost' : '') + '" id="virtualToggle" data-on="' + (vOn ? 1 : 0) + '">' + (vOn ? '非表示にする' : '表示する') + '</button></div>' +
+    '<p class="muted" style="margin:6px 0 0">settings シートの virtual_rating_visible と同じ設定です</p></div>';
   h += '<div class="card"><h2>すべての試合</h2>' + S.matches.slice(0, 300).map(adminRow).join('') + '</div>';
   return h;
 }
@@ -1173,7 +1178,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
@@ -1232,6 +1237,7 @@ document.getElementById('main').addEventListener('click', function (e) {
     return;
   }
   if (t.id === 'adminLogin') { var k = document.getElementById('adminKey').value; call('adminCheck', { admin_key: k }).then(function () { adminKey = k; render(); }).catch(function (er) { toast(er.message || er, true); }); return; }
+  if (t.id === 'virtualToggle') { var on = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'virtual_rating_visible', value: on }, on ? '参考レートを表示します' : '参考レートを非表示にしました'); return; }
   if (t.id === 'adminRecalc') { act('adminRecalc', { admin_key: adminKey }, '再計算しました'); return; }
   if (d.void) { if (t.dataset.sure) act('adminVoid', { admin_key: adminKey, match_id: d.void, note: '運営が無効化' }, '無効にしました'); else { t.dataset.sure = 1; t.textContent = 'もう一度押すと無効'; } return; }
   if (d.restore) { act('adminRestore', { admin_key: adminKey, match_id: d.restore }, '元に戻しました'); return; }

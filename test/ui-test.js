@@ -263,6 +263,23 @@ const server = http.createServer((req, res) => {
   const aChart = await page.$eval('details[data-sec=chart] summary', x => x.textContent);
   if (!aChart.includes('参考')) throw new Error('A のレート推移に参考の表示が無い: ' + aChart);
   await page.screenshot({ path: path.join(out, '16_me_A.png'), fullPage: true });
+  // 運営画面で参考レートを非表示にすると、個人ページから消える
+  await page.click('#adminBtn');
+  await page.waitForSelector('#virtualToggle');
+  if ((await page.getAttribute('#virtualToggle', 'data-on')) !== '1') throw new Error('参考レートの初期状態が表示中でない');
+  await page.click('#virtualToggle');
+  await page.waitForSelector('#virtualToggle[data-on="0"]');
+  await page.screenshot({ path: path.join(out, '6b_admin_virtual_off.png'), fullPage: true });
+  await page.click('nav button[data-tab=me]');
+  await page.selectOption('#meView', 'A');
+  const aHeroOff = await page.$eval('.hero', x => x.textContent);
+  if (aHeroOff.includes('参考')) throw new Error('非表示にしても参考レートが出ている: ' + aHeroOff);
+  if (await page.$('details[data-sec=chart]')) throw new Error('非表示にしても参考のレート推移が出ている');
+  await page.click('#adminBtn');
+  await page.click('#virtualToggle');
+  await page.waitForSelector('#virtualToggle[data-on="1"]');
+  await page.click('nav button[data-tab=me]');
+  await page.selectOption('#meView', 'A');
   await page.click('nav button[data-tab=rank]');
   const heads = await page.$$eval('table.rktable th', x => x.map(y => y.textContent).join(','));
   if (heads !== '順位,名前,レート,ボーナス,合計,試合数,チーム戦') throw new Error('ランキングの列: ' + heads);
