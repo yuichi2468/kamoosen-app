@@ -43,7 +43,7 @@ var HEADERS = {
                  'singles_throws', 'singles_hits', 'singles_hit_rate', 'lose_avg', 'lose_sets', 'updated_at'],
   awards: ['award', 'rank', 'player_id', 'name', 'value', 'detail', 'updated_at'],
   extra_bonus: ['player_id', 'name', 'wins', 'wins_pt', 'partners', 'partners_pt', 'opponents', 'opponents_pt', 'rookie_pt', 'total', 'applied', 'updated_at'],
-  schedule: ['player_id', 'date', 'hour', 'place', 'place_other', 'format', 'comment', 'created_at', 'updated_at', 'device']
+  schedule: ['player_id', 'date', 'hour', 'place', 'place_other', 'format', 'comment', 'created_at', 'updated_at', 'device', 'gear', 'via']
 };
 
 var DEFAULT_SETTINGS = [
@@ -75,7 +75,9 @@ var DEFAULT_SETTINGS = [
   ['sched_visible', true, '日程タブをアプリに表示するか（FALSE で非表示。運営画面からも切り替えられる）'],
   ['sched_day_start', 7, '日程: 時間割の最初の時間帯（7 なら 7時台から）'],
   ['sched_day_end', 20, '日程: 時間割の最後の時間帯（20 なら 20時台まで）'],
-  ['sched_places', '高原,鴨川南,飛鳥井', '日程: 希望場所の選択肢（カンマ区切り。「どこでも」「その他」は必ず出る）']
+  ['sched_places', '高原,鴨川南,飛鳥井', '日程: 希望場所の選択肢（カンマ区切り。「どこでも」「その他」は必ず出る）'],
+  ['sched_gear', 'set:モルックのセット', '日程: 参加登録の「持ち物」のボタン（記号:表示名 のカンマ区切り。先頭の項目は時間割に ● で出る）'],
+  ['sched_auto_join', true, '日程: 試合を始めたとき、日程に登録していない人をその時間に自動で追加するか（FALSE でしない。運営画面からも切り替えられる）']
 ];
 
 /* =====================================================================
@@ -1025,6 +1027,7 @@ function handle_(action, p) {
         row.throws_json = '[]'; row.leg_orders = '[]'; row.rev = 0; row.scorer = device;
       }
       appendObj_(SHEET.matches, row);
+      schedAutoJoin_(t1.concat(t2), now, id, device); // 日程に登録していない人を、いまの時間に自動で追加（日程調整 設計書 16章）
       log_('start', device, { match_id: id, team1: t1, team2: t2, scoring: scoring, use_order: row.use_order === 'TRUE', first_team: row.first_team || '' });
       return publicState_();
     }
@@ -1034,6 +1037,7 @@ function handle_(action, p) {
     if (action === 'cancel') {
       if (m.status !== 'playing') throw new Error('試合中の試合だけ取り消せます');
       setCells_(SHEET.matches, m._row, { status: 'void', note: '開始取り消し' });
+      schedAutoRemove_(m.match_id, device);
       log_('cancel', device, { match_id: m.match_id });
       return publicState_();
     }
@@ -1052,6 +1056,7 @@ function handle_(action, p) {
         winner: winner, status: 'done', entered_by: device, scoring: 'manual'
       });
       log_('result', device, { match_id: m.match_id, legs: [p.team1_legs, p.team2_legs], score: [p.team1_score, p.team2_score] });
+      schedAutoOnEnd_(m, now, device);
       recalc();
       return publicState_();
     }
@@ -1095,6 +1100,7 @@ function handle_(action, p) {
         });
         if (rows.length) tsh.getRange(tsh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
         log_('result', device, { match_id: m.match_id, legs: st.legsWon, score: st.totals, throws: rows.length });
+        schedAutoOnEnd_(m, now, device);
         recalc();
       }
       return publicState_();
@@ -1135,11 +1141,17 @@ function virtualVisible_(cfg) {
 }
 
 // 運営画面から変えられる設定（ここにあるものだけ書き換えを許す）
-var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating', sched_visible: 'bool' };
+var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating', sched_visible: 'bool', sched_auto_join: 'bool' };
 
 // 日程タブを表示するか（未設定なら表示）
 function schedVisible_(cfg) {
   var v = cfg.sched_visible;
+  return v === undefined || v === '' || v === null || toBool_(v) || v === 1;
+}
+
+// 試合を始めたとき日程に自動で追加するか（未設定なら追加する）
+function schedAutoOn_(cfg) {
+  var v = cfg.sched_auto_join;
   return v === undefined || v === '' || v === null || toBool_(v) || v === 1;
 }
 
@@ -1174,6 +1186,7 @@ function publicState_() {
   pubCfg.virtual_rating_visible = showVirtual;
   pubCfg.virtual_initial_rating = virtualStart_(cfg);
   pubCfg.sched_visible = schedVisible_(cfg);
+  pubCfg.sched_auto_join = schedAutoOn_(cfg);
   return {
     now: Date.now(),
     settings: pubCfg,
@@ -1252,7 +1265,20 @@ function schedConfig_(cfg) {
   var places = String(cfg.sched_places === undefined || cfg.sched_places === null ? '高原,鴨川南,飛鳥井' : cfg.sched_places)
     .split(',').map(function (x) { return x.trim(); })
     .filter(function (x) { return x && x !== SCHED_ANY_PLACE && x !== SCHED_OTHER; });
-  return { dates: dates, from: from, to: to, places: places };
+  var gear = [], gseen = {};
+  String(cfg.sched_gear === undefined || cfg.sched_gear === null ? 'set:モルックのセット' : cfg.sched_gear).split(',').forEach(function (x) {
+    var m = /^\s*([A-Za-z0-9_]+)\s*:\s*(.+?)\s*$/.exec(x);
+    if (m && !gseen[m[1]]) { gseen[m[1]] = 1; gear.push({ key: m[1], label: m[2] }); }
+  });
+  return { dates: dates, from: from, to: to, places: places, gear: gear };
+}
+
+/** 持ち物（gear）を検査してそろえる。list: 記号の配列。返り値は設定の順に並べたカンマ区切り */
+function normSchedGear(list, gear) {
+  list = (Array.isArray(list) ? list : String(list || '').split(',')).map(function (x) { return String(x).trim(); }).filter(String);
+  var keys = gear.map(function (g) { return g.key; });
+  list.forEach(function (x) { if (keys.indexOf(x) < 0) throw new Error('持ち物の項目が正しくありません: ' + x); });
+  return keys.filter(function (k) { return list.indexOf(k) >= 0; }).join(',');
 }
 
 /** 希望場所を検査してそろえる。places: 画面で選んだもの（配列）。何もなければ「どこでも」 */
@@ -1286,7 +1312,8 @@ function readSchedule_() {
     return { player_id: String(r.player_id).trim(), date: schedDate_(r.date), hour: Number(r.hour),
              place: String(r.place || SCHED_ANY_PLACE), place_other: unsafeText_(r.place_other),
              format: SCHED_FORMATS.indexOf(String(r.format)) >= 0 ? String(r.format) : 'どちらでも',
-             comment: unsafeText_(r.comment), created_at: toTime_(r.created_at), updated_at: toTime_(r.updated_at), device: String(r.device || '') };
+             comment: unsafeText_(r.comment), created_at: toTime_(r.created_at), updated_at: toTime_(r.updated_at), device: String(r.device || ''),
+             gear: String(r.gear === undefined || r.gear === null ? '' : r.gear), via: String(r.via === undefined || r.via === null ? '' : r.via) };
   }).filter(function (r) { return r.player_id && r.date && !isNaN(r.hour); });
 }
 
@@ -1296,9 +1323,11 @@ function scheduleState_() {
   sc.dates.forEach(function (d) { inRange[d] = 1; });
   return {
     now: Date.now(),
-    dates: sc.dates, day_start: sc.from, day_end: sc.to, places: sc.places,
+    dates: sc.dates, day_start: sc.from, day_end: sc.to, places: sc.places, gear: sc.gear,
     slots: readSchedule_().filter(function (r) { return inRange[r.date]; }).map(function (r) {
-      return { p: r.player_id, d: r.date, h: r.hour, place: r.place, other: r.place_other, format: r.format, comment: r.comment, c: r.created_at, u: r.updated_at };
+      var o = { p: r.player_id, d: r.date, h: r.hour, place: r.place, other: r.place_other, format: r.format, comment: r.comment, c: r.created_at, u: r.updated_at, gear: r.gear };
+      if (r.via) o.via = r.via; // 試合を始めたときに自動で入った参加（'match:<match_id>'）
+      return o;
     })
   };
 }
@@ -1306,7 +1335,7 @@ function scheduleState_() {
 /**
  * 参加の登録・取り消しの中身（シートに依存しない。テスト対象）
  * rows: 今の全参加。p: 画面から来た内容。返り値: { rows: 新しい全参加, added, updated, removed, skipped }
- *  schedSet:   p = { player_id, items: [{date, hour}], remove: [{date, hour}], place: [..], place_other, format, comment, skip_existing }
+ *  schedSet:   p = { player_id, items: [{date, hour}], remove: [{date, hour}], place: [..], place_other, format, comment, gear: [..], skip_existing }
  *  schedLeave: p = { player_id, items: [{date, hour}] }
  */
 function applySchedule(action, rows, p, players, cfg, now, device) {
@@ -1344,6 +1373,7 @@ function applySchedule(action, rows, p, players, cfg, now, device) {
     if (SCHED_FORMATS.indexOf(format) < 0) throw new Error('希望形式が正しくありません: ' + format);
     var comment = String(p.comment || '').trim();
     if (comment.length > SCHED_COMMENT_MAX) throw new Error('ひとことは' + SCHED_COMMENT_MAX + '文字までです');
+    var gear = normSchedGear(p.gear, sc.gear);
     var keep = {};
     items.forEach(function (s) { keep[s.key] = 1; });
     remove.forEach(function (s) {
@@ -1352,7 +1382,8 @@ function applySchedule(action, rows, p, players, cfg, now, device) {
     });
     items.forEach(function (s) {
       var i = index[pid + '|' + s.key];
-      var vals = { place: place.place, place_other: place.place_other, format: format, comment: safeText_(comment), updated_at: new Date(now), device: device };
+      // 本人が登録・編集したら、試合で自動に入った印（via）は外す
+      var vals = { place: place.place, place_other: place.place_other, format: format, comment: safeText_(comment), gear: gear, via: '', updated_at: new Date(now), device: device };
       if (i !== undefined) {
         if (p.skip_existing) { res.skipped++; return; }
         var o = {}; Object.keys(out[i]).forEach(function (k) { o[k] = out[i][k]; });
@@ -1372,36 +1403,124 @@ function applySchedule(action, rows, p, players, cfg, now, device) {
   return res;
 }
 
-/** 参加の登録・取り消し（シートを書き換える） */
-function schedWrite_(action, p) {
-  var cfg = readSettings_(), players = readPlayers_();
-  if (!schedVisible_(cfg)) throw new Error('日程は運営が非表示にしています');
-  var device = deviceLabel_(p.device);
+/** schedule シートを用意する（無ければ作り、足りない列は右端に足す）。返り値: [シート, 見出し] */
+function schedSheet_() {
   if (!sheetExists_(SHEET.schedule)) { // setup を実行していなくても使えるように、初めての書き込みで作る
     var nsh = ss_().insertSheet(SHEET.schedule);
     nsh.getRange(1, 1, 1, HEADERS.schedule.length).setValues([HEADERS.schedule]).setFontWeight('bold');
     nsh.setFrozenRows(1);
   }
   var sh = sheet_(SHEET.schedule);
-  var before = readSchedule_().map(function (r) {
-    // 書き戻すときに、読んだ値（数式よけの ' 付き）のままにする
+  var head = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0].map(String);
+  while (head.length && !head[head.length - 1]) head.pop();
+  var missing = HEADERS.schedule.filter(function (h) { return head.indexOf(h) < 0; });
+  if (missing.length) {
+    sh.getRange(1, head.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    head = head.concat(missing);
+  }
+  return [sh, head];
+}
+
+/** 書き戻し用に今の全参加を読む（数式よけの ' 付き・日時は Date のまま） */
+function readScheduleRaw_() {
+  return readSchedule_().map(function (r) {
     r.place_other = safeText_(r.place_other); r.comment = safeText_(r.comment);
     r.created_at = isNaN(r.created_at) ? '' : new Date(r.created_at); r.updated_at = isNaN(r.updated_at) ? '' : new Date(r.updated_at);
     return r;
   });
-  var res = applySchedule(action, before, p, players, cfg, Date.now(), device);
-  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+}
+
+/** 全参加を書き直す（減った分の行は空にする） */
+function writeScheduleRows_(sh, head, rows) {
   var oldLast = sh.getLastRow();
-  var values = res.rows.map(function (r) { return head.map(function (h) { return r[h] === undefined || r[h] === null ? '' : r[h]; }); });
+  var values = rows.map(function (r) { return head.map(function (h) { return r[h] === undefined || r[h] === null ? '' : r[h]; }); });
   sh.getRange('B:B').setNumberFormat('@');
   if (values.length) sh.getRange(2, 1, values.length, head.length).setValues(values);
   var extra = oldLast - 1 - values.length;
   if (extra > 0) sh.getRange(values.length + 2, 1, extra, head.length).setValues(Array.apply(null, Array(extra)).map(function () { return head.map(function () { return ''; }); }));
+}
+
+/** 参加の登録・取り消し（シートを書き換える） */
+function schedWrite_(action, p) {
+  var cfg = readSettings_(), players = readPlayers_();
+  if (!schedVisible_(cfg)) throw new Error('日程は運営が非表示にしています');
+  var device = deviceLabel_(p.device);
+  var sh = schedSheet_(), before = readScheduleRaw_();
+  var res = applySchedule(action, before, p, players, cfg, Date.now(), device);
+  writeScheduleRows_(sh[0], sh[1], res.rows);
   var items = (p.items || []).map(function (it) { return schedDate_(it.date).slice(5) + ' ' + it.hour; });
   log_(action, device, { player_id: p.player_id, items: items.join(','), added: res.added, updated: res.updated, removed: res.removed, skipped: res.skipped });
   var st = scheduleState_();
   st.result = { added: res.added, updated: res.updated, removed: res.removed, skipped: res.skipped };
   return st;
+}
+
+/**
+ * 試合を始めた（終わった）ときに、日程に登録していない人を時刻 t のマスに自動で入れる（シートに依存しない。テスト対象）
+ * 入れられないマス（期間外・時間割の外）や、参加済み・400マスに達した人は黙って飛ばす。返り値: 足す行の配列
+ */
+function autoSchedule(rows, ids, t, cfg, players, matchId, device) {
+  if (!schedVisible_(cfg) || !schedAutoOn_(cfg)) return [];
+  var sc = schedConfig_(cfg), jp = jstParts_(t);
+  if (sc.dates.indexOf(jp.date) < 0 || jp.hour < sc.from || jp.hour > sc.to) return [];
+  var out = [], seen = {};
+  (ids || []).forEach(function (id) {
+    id = String(id);
+    if (seen[id]) return; seen[id] = 1;
+    var pl = players.filter(function (x) { return x.player_id === id; })[0];
+    if (!pl || pl.active === false) return;
+    var mine = rows.filter(function (r) { return r.player_id === id; });
+    if (mine.some(function (r) { return r.date === jp.date && r.hour === jp.hour; })) return;
+    if (mine.length >= SCHED_MAX_PER_PLAYER) return;
+    out.push({ player_id: id, date: jp.date, hour: jp.hour, place: SCHED_ANY_PLACE, place_other: '', format: 'どちらでも', comment: '', gear: '',
+               via: 'match:' + matchId, created_at: new Date(t), updated_at: new Date(t), device: device });
+  });
+  return out;
+}
+
+/** 試合の開始・終了で日程に自動で追加する。失敗しても試合の記録は止めない（呼ぶ側はロックの中） */
+function schedAutoJoin_(ids, t, matchId, device) {
+  try {
+    var cfg = readSettings_();
+    if (!schedVisible_(cfg) || !schedAutoOn_(cfg)) return 0;
+    var add = autoSchedule(readSchedule_(), ids, t, cfg, readPlayers_(), matchId, device);
+    if (!add.length) return 0;
+    var sh = schedSheet_(), head = sh[1];
+    var at = sh[0].getLastRow() + 1;
+    sh[0].getRange('B:B').setNumberFormat('@');
+    sh[0].getRange(at, 1, add.length, head.length).setValues(add.map(function (r) { return head.map(function (h) { return r[h] === undefined || r[h] === null ? '' : r[h]; }); }));
+    log_('schedAuto', device, { match_id: matchId, items: add.map(function (r) { return r.player_id + ' ' + r.date.slice(5) + ' ' + r.hour; }).join(',') });
+    return add.length;
+  } catch (e) {
+    log_('schedAutoError', device, { match_id: matchId, error: String(e && e.message ? e.message : e) });
+    return 0;
+  }
+}
+
+/** 開始取り消しのとき、その試合で自動に入れた参加（編集されていないもの）を消す */
+function schedAutoRemove_(matchId, device) {
+  try {
+    if (!sheetExists_(SHEET.schedule)) return 0;
+    var rows = readScheduleRaw_(), via = 'match:' + matchId;
+    var keep = rows.filter(function (r) { return r.via !== via; });
+    if (keep.length === rows.length) return 0;
+    var sh = schedSheet_();
+    writeScheduleRows_(sh[0], sh[1], keep);
+    log_('schedAutoRemove', device, { match_id: matchId, removed: rows.length - keep.length });
+    return rows.length - keep.length;
+  } catch (e) {
+    log_('schedAutoError', device, { match_id: matchId, error: String(e && e.message ? e.message : e) });
+    return 0;
+  }
+}
+
+/** 試合が終わったとき、終わった時刻のマスが始めたマスと違えば、そのマスにも入れる */
+function schedAutoOnEnd_(m, now, device) {
+  var st = toTime_(m.started_at);
+  if (isNaN(st)) return;
+  var a = jstParts_(st), b = jstParts_(now);
+  if (a.date === b.date && a.hour === b.hour) return;
+  schedAutoJoin_(parseIds_(m.team1_ids).concat(parseIds_(m.team2_ids)), now, m.match_id, device);
 }
 
 /* =====================================================================

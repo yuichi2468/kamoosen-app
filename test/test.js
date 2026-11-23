@@ -693,6 +693,104 @@ console.log('■ 日程調整');
     eq(r.data.slots[0].d, '2026-11-25');
     eq(badValues(r, 'schedule', []), []);
   });
+  t('持ち物（モルックのセット）を保存・上書きでき、未知の項目は断る', () => {
+    const g = mk();
+    eq(g.api('schedule').data.gear, [{ key: 'set', label: 'モルックのセット' }]);
+    let r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }], gear: ['set'] });
+    eq(r.ok, true, r.error);
+    eq(r.data.slots[0].gear, 'set');
+    r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }, { date: '2026-11-25', hour: 19 }], gear: [], skip_existing: true });
+    eq(r.data.slots.map(x => x.gear), ['set', '']); // 参加済みは飛ばすのでそのまま
+    r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }] });
+    eq(r.data.slots.find(x => x.h === 18).gear, '');
+    r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }], gear: ['car'] });
+    eq(r.ok, false); assert.ok(r.error.includes('持ち物'), r.error);
+    g.__sheets.settings.appendRow(['sched_gear', 'set:セット,judge:審判できる', '']);
+    r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }], gear: ['judge', 'set', 'set'] });
+    eq(r.data.slots.find(x => x.h === 18).gear, 'set,judge');
+  });
+  t('gear・via 列の無い古い schedule シートでも、書き込むと列が足される', () => {
+    const g = mk();
+    g.__sheets.schedule.data[0] = g.__sheets.schedule.data[0].slice(0, 10);
+    const r = S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 18 }], gear: ['set'] });
+    eq(r.ok, true, r.error);
+    eq(g.__sheets.schedule.data[0].slice(10), ['gear', 'via']);
+    eq(g.api('schedule').data.slots[0].gear, 'set');
+  });
+
+  // 試合開始で自動追加（日程調整 設計書 16章）
+  const slotsOf = g => g.api('schedule').data.slots.map(x => [x.p, x.d, x.h, x.via || '']).sort((a, b) => String(a).localeCompare(String(b)));
+  t('試合を始めると、未登録の人だけいまのマスに自動で入る（登録済みはそのまま）', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-25', hour: 10 }], comment: 'いる' });
+    const r = g.api('start', { team1: ['p1'], team2: ['p2', 'p3'], device: 'd' });
+    eq(r.ok, true, r.error);
+    const mid = r.data.matches[0].id;
+    eq(slotsOf(g), [['p1', '2026-11-25', 10, ''], ['p2', '2026-11-25', 10, 'match:' + mid], ['p3', '2026-11-25', 10, 'match:' + mid]]);
+    const s = g.api('schedule').data.slots.find(x => x.p === 'p2');
+    eq([s.place, s.format, s.comment, s.gear], ['どこでも', 'どちらでも', '', '']);
+    eq(g.api('schedule').data.slots.find(x => x.p === 'p1').comment, 'いる');
+    assert.ok(g.__sheets.log.data.some(row => row[1] === 'schedAuto'));
+  });
+  t('時間割の外（21時台）・日程非表示・自動追加OFFのときは入れない', () => {
+    let g = mk();
+    g.__setNow(Date.parse('2026-11-25T06:30:00+09:00')); // 7時台より前（試合は開始できる）
+    g.__sheets.settings.data.find(r => r[0] === 'start_at')[1] = new Date('2026-11-24T06:00:00+09:00');
+    eq(g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' }).ok, true);
+    eq(slotsOf(g), []);
+    g = mk();
+    g.api('adminSetting', { admin_key: 'change-me', key: 'sched_visible', value: false });
+    eq(g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' }).ok, true);
+    eq(g.api('schedule').data.slots, []);
+    g = mk();
+    const r = g.api('adminSetting', { admin_key: 'change-me', key: 'sched_auto_join', value: false });
+    eq(r.data.settings.sched_auto_join, false);
+    eq(g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' }).ok, true);
+    eq(slotsOf(g), []);
+  });
+  t('400マスに達している人には入れない', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p1', items: [{ date: '2026-11-30', hour: 9 }] }); // シートと列を作る
+    const sh = g.__sheets.schedule, head = sh.data[0];
+    for (let i = 1; i < 400; i++) sh.appendRow(head.map(h => ({ player_id: 'p1', date: '2026-11-' + (26 + i % 4), hour: 7 + (i % 14), place: 'どこでも', format: 'どちらでも' })[h] ?? ''));
+    eq(g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' }).ok, true);
+    eq(slotsOf(g).filter(x => x[2] === 10 && x[1] === '2026-11-25').map(x => x[0]), ['p2']);
+  });
+  t('時間をまたいで終わったら、終わった時間のマスにも入る（結果入力・1投ごと）', () => {
+    const g = mk();
+    g.__setNow(Date.parse('2026-11-25T10:50:00+09:00'));
+    let r = g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' });
+    const mid = r.data.matches[0].id;
+    r = g.api('start', { team1: ['p3'], team2: ['p1', 'p2'], device: 'd' }); // 同時に試合中でもよい
+    g.__setNow(Date.parse('2026-11-25T11:10:00+09:00'));
+    eq(g.api('result', { match_id: mid, team1_legs: 2, team2_legs: 1, device: 'd' }).ok, true);
+    eq(slotsOf(g).filter(x => x[2] === 11).map(x => x[0] + ' ' + x[3]), ['p1 match:' + mid, 'p2 match:' + mid]);
+  });
+  t('同じ時間のうちに終わったら、次のマスには入れない', () => {
+    const g = mk();
+    const r = g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' });
+    g.__advance(20 * 60000);
+    g.api('result', { match_id: r.data.matches[0].id, team1_legs: 2, team2_legs: 0, device: 'd' });
+    eq(slotsOf(g).map(x => x[2]), [10, 10]);
+  });
+  t('開始を取り消すと自動で入れた参加は消え、本人が編集したものと元からの参加は残る', () => {
+    const g = mk();
+    S(g, 'schedSet', { player_id: 'p3', items: [{ date: '2026-11-25', hour: 10 }] });
+    const r = g.api('start', { team1: ['p1', 'p3'], team2: ['p2'], device: 'd' });
+    const mid = r.data.matches[0].id;
+    S(g, 'schedSet', { player_id: 'p2', items: [{ date: '2026-11-25', hour: 10 }], comment: 'まだいます' }); // 編集で via が外れる
+    eq(g.api('cancel', { match_id: mid, device: 'd' }).ok, true);
+    eq(slotsOf(g), [['p2', '2026-11-25', 10, ''], ['p3', '2026-11-25', 10, '']]);
+  });
+  t('日程の書き込みで失敗しても、試合の開始は成功する', () => {
+    const g = mk();
+    const orig = g.__sheets.schedule.getRange;
+    g.__sheets.schedule.getRange = function (a) { if (typeof a === 'number' && a > 1) throw new Error('boom'); return orig.apply(this, arguments); };
+    const r = g.api('start', { team1: ['p1'], team2: ['p2'], device: 'd' });
+    eq(r.ok, true, r.error);
+    eq(r.data.matches[0].status, 'playing');
+    assert.ok(g.__sheets.log.data.some(row => row[1] === 'schedAutoError'));
+  });
 }
 
 console.log('■ 画面側の式がサーバーと一致');
