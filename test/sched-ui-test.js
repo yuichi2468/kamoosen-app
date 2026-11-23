@@ -73,19 +73,33 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   if ((await page.textContent('[data-snew]')).trim() !== '新着 4件') fail('新着の件数: ' + await page.textContent('[data-snew]'));
   await page.screenshot({ path: path.join(out, 's2_grid.png'), fullPage: true });
 
-  // 新着 → 最初の新着のマスの詳細。名前の前に緑の「新」。指定のある項目だけ枠で出す
+  // 絞り込みには「絞り込み」の文字が付く
+  if ((await page.textContent('.schfilter .schflabel')).trim() !== '絞り込み') fail('絞り込みのラベルが無い');
+  // 新着 → 新着の一覧（マスごとにまとめて全部）。名前の前に緑の「新」
   await page.click('[data-snew]');
   await page.waitForSelector('.schsheet');
-  if (!/11\/25\(水\) 18時台/.test(await page.textContent('.schsh'))) fail('新着の最初のマスが開かない');
+  if (!/新着 4件/.test(await page.textContent('.schsh'))) fail('新着の一覧が開かない: ' + await page.textContent('.schsh'));
+  if ((await page.$$('.schsheet .newb')).length !== 4) fail('一覧に新着が全部出ない');
+  const heads = await page.$$eval('.schsheet .schngh', l => l.map(x => x.textContent));
+  if (heads.length !== 3 || !/^11\/25\(水\) 18時台/.test(heads[0]) || !/^11\/25\(水\) 19時台/.test(heads[1]) || !/^11\/26\(木\) 12時台/.test(heads[2])) fail('一覧のまとめ方: ' + JSON.stringify(heads));
+  if (!/18時半/.test(await page.textContent('.schsheet'))) fail('一覧にひとことが出ない');
+  await page.screenshot({ path: path.join(out, 's3a_news.png') });
+  // 一覧のマスの見出し → そのマスの詳細。名前の前に緑の「新」。指定のある項目だけ枠で出す
+  await page.click('.schsheet .schngh >> nth=0');
+  await page.waitForSelector('[data-snewback]');
+  if (!/11\/25\(水\) 18時台/.test(await page.textContent('.schsh'))) fail('一覧からマスが開かない');
   if ((await page.$$('.schsheet .newb')).length !== 2) fail('「新」が2人に付いていない');
   const det = await page.textContent('.schsheet');
   if (!/高原・飛鳥井/.test(det) || !/チーム戦/.test(det) || !/18時半/.test(det) || !/その他: 体育館・鴨川南|鴨川南・その他: 体育館/.test(det)) fail('詳細の項目: ' + det);
   const boxes = await page.$$eval('.schsheet .schbox', l => l.length);
   if (boxes !== 5) fail('指定のある項目だけ出ていない: ' + boxes); // 青木 高原 / 石田 チーム戦・高原飛鳥井・ひとこと / 上野? → 石田(P02)3 + 青木1 + 上野(P03)1
   await page.screenshot({ path: path.join(out, 's3_detail_new.png') });
+  // 戻ると一覧のまま。閉じると全部「見た」扱い
+  await page.click('[data-snewback]');
+  if ((await page.$$('.schsheet .schngh')).length !== 3) fail('一覧に戻れない');
   await page.click('.schsheet .schx');
-  if (await page.$(cell('2026-11-25', 18) + ' .ndot')) fail('開いたのに新着の点が残る');
-  if ((await page.textContent('[data-snew]')).trim() !== '新着 2件') fail('開いた分が新着から外れない');
+  if (await page.$('#schGrid .ndot')) fail('一覧を見たのに新着の点が残る');
+  if (await page.$('[data-snew]')) fail('一覧を見たのに新着が残る');
   // 標準は「時間を選んで参加」。操作の注意書きは時間割の上
   if ((await page.getAttribute('[data-smode="pick"]', 'class')) !== 'on') fail('最初が「時間を選んで参加」になっていない');
   const hintBox = await page.locator('.schhint').boundingBox(), gridBox = await page.locator('#schGrid').boundingBox();
