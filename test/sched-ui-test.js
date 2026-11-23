@@ -69,7 +69,8 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   if ((await page.textContent(cell('2026-11-25', 18))).trim() !== '3') fail('人数が違う: ' + await page.textContent(cell('2026-11-25', 18)));
   if (!(await page.$(cell('2026-11-25', 18) + '.mine .ndot'))) fail('自分の枠・新着の点が無い');
   if (!(await page.$(cell('2026-11-25', 9) + '.past'))) fail('過ぎたマスが灰色でない');
-  if (!/試合中1/.test(await page.textContent(cell('2026-11-25', 10)))) fail('いまのマスに試合中が出ない');
+  // 試合中は江藤（参加済み）と大西（試合開始で自動追加。日程調整 設計書 16章）の2人
+  if (!/^3試合中2/.test((await page.textContent(cell('2026-11-25', 10))).trim())) fail('いまのマスに試合中が出ない: ' + await page.textContent(cell('2026-11-25', 10)));
   if ((await page.textContent('[data-snew]')).trim() !== '新着 4件') fail('新着の件数: ' + await page.textContent('[data-snew]'));
   await page.screenshot({ path: path.join(out, 's2_grid.png'), fullPage: true });
 
@@ -278,12 +279,53 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   await page.setViewportSize({ width: 390, height: 844 });
   await page.click('nav button[data-tab=sched]');
   await page.waitForSelector('#schGrid');
+  // 持ち物（モルックのセット）: 登録画面のボタン → 時間割の ●・詳細の「セットあり N人」・絞り込み（設計書 15章）
+  if ((await page.getAttribute('[data-smode="pick"]', 'class')) !== 'on') await page.click('[data-smode="pick"]');
+  if (await page.$(cell('2026-11-25', 18) + ' .gdot')) fail('セットの無いマスに ● が出る');
+  await page.click(cell('2026-11-27', 13)); await page.click(cell('2026-11-27', 14));
+  await page.click('[data-sselgo]');
+  await page.waitForSelector('[data-sgear="set"]');
+  if (!/モルックのセットを持っていく/.test(await page.textContent('[data-sgear="set"]'))) fail('持ち物のボタンの文言');
+  if (await page.$('[data-sgear="set"].on')) fail('持ち物が最初から ON になっている');
+  await page.click('[data-sgear="set"]');
+  if (!(await page.$('[data-sgear="set"].on'))) fail('持ち物のボタンが ON にならない');
+  await page.screenshot({ path: path.join(out, 's11_gear_form.png') });
+  await page.click('[data-ssave]');
+  await page.waitForSelector(cell('2026-11-27', 13) + ' .gdot');
+  if (slotsOf('P01').filter(x => x.d === '2026-11-27').map(x => x.gear).join() !== 'set,set') fail('セットありが保存されない');
+  await page.screenshot({ path: path.join(out, 's12_gear_grid.png'), fullPage: true });
+  await page.click('[data-smode="view"]');
+  await page.click(cell('2026-11-27', 13));
+  await page.waitForSelector('.schsheet');
+  if (!/セットあり 1人/.test(await page.textContent('.schgearn'))) fail('詳細に「セットあり N人」が出ない');
+  if (!/セットあり/.test(await page.textContent('.schsheet .schpf'))) fail('参加者の枠に「セットあり」が出ない');
+  await page.click('.schsheet .schx');
+  // 試合開始で自動追加された人には「試合で追加」、セットのいないマスには「いません」（設計書 16章）
+  await page.click(cell('2026-11-25', 10));
+  await page.waitForSelector('.schsheet');
+  if (!/大西[\s\S]*試合で追加/.test(await page.textContent('.schsheet'))) fail('「試合で追加」が出ない: ' + await page.textContent('.schsheet'));
+  if ((await page.$$('.schsheet .schvia')).length !== 1) fail('「試合で追加」は自動で入った人だけ');
+  if (!/セットを持っていく人がいません/.test(await page.textContent('.schsheet'))) fail('セットのいないマスの表示');
+  await page.screenshot({ path: path.join(out, 's13_auto_join.png') });
+  await page.click('.schsheet .schx');
+  await page.check('#schGearOnly');
+  if ((await page.textContent(cell('2026-11-25', 18))).trim() !== '') fail('セットありで絞っても、セットの無いマスに数字が出る');
+  if (!/^1/.test((await page.textContent(cell('2026-11-27', 13))).trim())) fail('セットありで絞ると、セットのあるマスの数字が消える');
+  await page.uncheck('#schGearOnly');
+  await page.click('[data-smode="pick"]');
+
   const key = g.__sheets.settings.data.find(r => r[0] === 'admin_key')[1];
   await page.click('#adminBtn');
   await page.fill('#adminKey', String(key));
   await page.click('#adminLogin');
   await page.waitForSelector('#schedToggle');
   await page.screenshot({ path: path.join(out, 's10_admin_toggle.png'), fullPage: true });
+  // 試合開始で日程に自動追加: する／しない
+  await page.click('#schedAutoToggle');
+  await page.waitForSelector('#schedAutoToggle[data-on="0"]');
+  if (g.api('state').data.settings.sched_auto_join !== false) fail('自動追加を「しない」にできない');
+  await page.click('#schedAutoToggle');
+  await page.waitForSelector('#schedAutoToggle[data-on="1"]');
   await page.click('#schedToggle');
   await page.waitForSelector('#schedToggle[data-on="0"]');
   if (await page.isVisible('nav button[data-tab=sched]')) fail('非表示にしても日程タブが出ている');

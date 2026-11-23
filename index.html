@@ -311,6 +311,10 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .schgrid td.past { background: #ecebe6; color: #9a9f9c; border-color: #ecebe6; }
 .schgrid td.past.mine { box-shadow: inset 0 0 0 2px #9a9f9c; }
 .schgrid td.now { outline: 2px solid var(--ink); outline-offset: 1px; }
+.schgrid .gdot { position: absolute; left: 4px; bottom: 3px; font-size: 11px; line-height: 1; }
+.schgrid td.c0 .gdot { color: var(--accent); }
+.schgearn { margin: 0 0 6px; font-size: 13px; }
+.schvia { font-size: 11px; color: var(--muted); margin-left: 4px; }
 .schgrid .ndot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); border: 1px solid #fff; }
 .schhint { margin: 8px 4px 8px; font-size: 12px; line-height: 1.5; }
 .schmode { display: flex; width: 100%; }
@@ -1238,7 +1242,7 @@ function viewAdmin() {
     return h + '<p class="muted">運営パスワードを入れてください（スプレッドシートの settings シートの admin_key）。</p><div class="row"><input type="password" id="adminKey"><button class="btn" id="adminLogin">入る</button></div></div>';
   }
   h += '<div class="row"><button class="btn" id="adminRecalc">レート再計算</button><span class="muted">シートを直接直したあとに押してください</span></div></div>';
-  var vOn = S.settings.virtual_rating_visible !== false, sOn = S.settings.sched_visible !== false;
+  var vOn = S.settings.virtual_rating_visible !== false, sOn = S.settings.sched_visible !== false, aOn = S.settings.sched_auto_join !== false;
   h += '<div class="card"><h2>表示の設定</h2><div class="row"><span><b>レート固定の人の参考レート</b><br><span class="muted">ほかの人と同じように変動した場合のレート（個人ページ・ランキングのレイドバトル欄）</span></span>' +
     '</div><div class="row" style="margin-top:6px">' + (vOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
     '<button class="btn small' + (vOn ? ' ghost' : '') + '" id="virtualToggle" data-on="' + (vOn ? 1 : 0) + '">' + (vOn ? '非表示にする' : '表示する') + '</button></div>' +
@@ -1249,7 +1253,11 @@ function viewAdmin() {
     '<div class="row" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><span><b>日程タブ</b><br><span class="muted">いつ対戦できるかを登録する時間割（非表示のあいだは参加の登録もできません。登録済みの内容は残ります）</span></span></div>' +
     '<div class="row" style="margin-top:6px">' + (sOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
     '<button class="btn small' + (sOn ? ' ghost' : '') + '" id="schedToggle" data-on="' + (sOn ? 1 : 0) + '">' + (sOn ? '非表示にする' : '表示する') + '</button></div>' +
-    '<p class="muted" style="margin:6px 0 0">settings シートの sched_visible と同じ設定です</p></div>';
+    '<p class="muted" style="margin:6px 0 0">settings シートの sched_visible と同じ設定です</p>' +
+    '<div class="row" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><span><b>試合開始で日程に自動追加</b><br><span class="muted">試合を始めたとき、日程に登録していない人をその時間に追加します（取り消すと消えます）</span></span></div>' +
+    '<div class="row" style="margin-top:6px">' + (aOn ? '<span class="badge ok">する</span>' : '<span class="badge">しない</span>') +
+    '<button class="btn small' + (aOn ? ' ghost' : '') + '" id="schedAutoToggle" data-on="' + (aOn ? 1 : 0) + '">' + (aOn ? 'しないにする' : 'するにする') + '</button></div>' +
+    '<p class="muted" style="margin:6px 0 0">settings シートの sched_auto_join と同じ設定です</p></div>';
   h += '<div class="card"><h2>すべての試合</h2>' + S.matches.slice(0, 300).map(adminRow).join('') + '</div>';
   return h;
 }
@@ -1266,9 +1274,9 @@ function adminRow(m) {
 var SCH = null, schOff = 0, schLoading = false;     // 日程のデータ、サーバーとの時計のずれ
 var schMe = store('kamo_sched_me') || '';            // この端末で日程を使う人
 var schStart = null;                                  // 時間割の左端の日（dates の番号）
-var schF = { place: '', format: '', mine: false };    // 絞り込み
+var schF = { place: '', format: '', mine: false, gear: false };    // 絞り込み（gear: セットのあるマスだけ）
 var schOpen = null;   // マスの詳細 { d, h, fresh: {player_id: 1}, back: 新着一覧 } / 新着の一覧 { news: [参加] }
-var schForm = null;   // 参加の入力 { mode: 'new'|'edit', d, from, to, orig: [時], place: [], other, format, comment }
+var schForm = null;   // 参加の入力 { mode: 'new'|'edit', d, from, to, orig: [時], place: [], other, format, comment, gear: [] }
 var schBulk = null;   // まとめて追加 { dates: {}, from, to, place: [], other, format, comment, overwrite }
 var schSending = 0;
 var schBase = null;   // 新着の基準（前回閉じた時刻）
@@ -1316,7 +1324,7 @@ function schFresh() {
   var out = [], seen = schSeen(), base = schBase === null || schBase < 0 ? Infinity : schBase;
   if (!schMe) return out;
   SCH.slots.forEach(function (x) {
-    if (x.p === schMe || !(x.c > base)) return;
+    if (x.p === schMe || !(x.c > base) || x.via) return; // 試合で自動に入った参加は新着にしない
     var k = schKey(x.d, x.h);
     if (seen[k] && x.c <= seen[k]) return;
     if (!schMine(x.d, x.h)) return;
@@ -1329,6 +1337,12 @@ function schMatch(x) {
   if (schF.format && x.format !== schF.format && x.format !== 'どちらでも') return false;
   return true;
 }
+// 持ち物（gear）。先頭の項目（モルックのセット）は時間割に ● で出す
+function schGearList() { return (SCH && SCH.gear) || []; }
+function schHasGear(x, key) { return !!x.gear && x.gear.split(',').indexOf(key) >= 0; }
+function schGearShort() { var g = schGearList()[0]; return g ? g.label.replace(/^モルックの/, '') : ''; }
+function schSetKey() { var g = schGearList(); return g.length ? g[0].key : ''; }
+function schGearCount(list) { var k = schSetKey(); return k ? list.filter(function (x) { return schHasGear(x, k); }).length : 0; }
 function placeText(x) {
   return x.place.split(',').map(function (p) { return p === SCH_OTHER ? 'その他: ' + x.other : p; }).join('・');
 }
@@ -1344,6 +1358,7 @@ function viewSched() {
   // 絞り込み
   h += '<div class="schfilter"><span class="schflabel">絞り込み</span><select id="schPlace"><option value="">場所: すべて</option>' + SCH.places.concat([SCH_OTHER]).map(function (p) { return '<option' + (schF.place === p ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select>' +
     '<select id="schFormat"><option value="">形式: すべて</option>' + ['個人戦', 'チーム戦'].map(function (p) { return '<option' + (schF.format === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
+    (schSetKey() ? '<label class="schmine"><input type="checkbox" id="schGearOnly"' + (schF.gear ? ' checked' : '') + '> ' + esc(schGearShort()) + 'あり</label>' : '') +
     '<label class="schmine"><input type="checkbox" id="schMineOnly"' + (schF.mine ? ' checked' : '') + '> 自分のみ</label></div>';
   var fresh = schFresh();
   if (fresh.length) h += '<button class="schnew" data-snew="1">新着 ' + fresh.length + '件</button>';
@@ -1369,7 +1384,8 @@ function schGrid(fresh) {
   var h = '<div class="card schcard"><div class="schmode seg"><button data-smode="pick" class="' + (schMode === 'pick' ? 'on' : '') + '">時間を選んで参加</button><button data-smode="view" class="' + (schMode === 'view' ? 'on' : '') + '">参加者を見る</button></div>';
   h += '<p class="muted schhint">' + (schMode === 'pick'
     ? '参加できる時間のマスをタップして選び（もう一度タップで外す）、下の「参加登録」でまとめて登録します。スマホは長押ししてからなぞると、続けて選べます。数字はその時間に参加している人数です。'
-    : 'マスをタップすると、その時間の参加者が見られます。自分の参加の編集・取り消しもここからできます。数字はその時間に参加している人数です。') + '</p>';
+    : 'マスをタップすると、その時間の参加者が見られます。自分の参加の編集・取り消しもここからできます。数字はその時間に参加している人数です。') +
+    (schSetKey() ? '左下の ● は' + esc(schGearShort()) + 'を持っていく人がいる時間です。' : '') + '</p>';
   h += '<div class="schnav"><button class="btn small ghost" data-sday="-' + cols + '"' + (schStart <= 0 ? ' disabled' : '') + '>‹</button>' +
     '<span class="muted">' + dLabel(ds[0]) + ' 〜 ' + dLabel(ds[ds.length - 1]) + '</span>' +
     '<button class="btn small ghost" data-sday="' + cols + '"' + (schStart >= max ? ' disabled' : '') + '>›</button></div>';
@@ -1378,11 +1394,12 @@ function schGrid(fresh) {
     h += '<tr><th class="schtime">' + hr + '</th>';
     ds.forEach(function (d) {
       var k = schKey(d, hr), list = (SCH.by[k] || []).filter(schMatch), mine = !!schMine(d, hr), past = slotPast(d, hr), now = slotNow(d, hr);
-      var cnt = schF.mine && !mine ? 0 : list.length;
+      var gearN = schGearCount(list);
+      var cnt = (schF.mine && !mine) || (schF.gear && !gearN) ? 0 : list.length;
       var playing = now ? list.filter(function (x) { return busy[x.p]; }).length : 0;
       var cls = 'c' + Math.min(cnt, 2) + (mine ? ' mine' : '') + (past ? ' past' : '') + (now ? ' now' : '') + (schMode === 'pick' && schSel[k] && !past ? ' sel' : '');
       h += '<td class="' + cls + '" data-sd="' + d + '" data-sh="' + hr + '">' + (cnt ? '<b>' + cnt + '</b>' : '') +
-        (playing && cnt ? '<small>試合中' + playing + '</small>' : '') + (dot[k] ? '<i class="ndot"></i>' : '') + '</td>';
+        (playing && cnt ? '<small>試合中' + playing + '</small>' : '') + (dot[k] ? '<i class="ndot"></i>' : '') + (cnt && gearN ? '<i class="gdot" title="' + esc(schGearShort()) + 'あり">●</i>' : '') + '</td>';
     });
     h += '</tr>';
   });
@@ -1397,10 +1414,12 @@ function schSheet(title, body) {
 function schPerson(x, isNew, playing) {
   var p = P(x.p);
   var b = '<div class="schp"><div class="schpn">' + (isNew ? '<span class="newb">新</span>' : '') + '<b>' + esc(p.name) + '</b> <span class="muted">' + (p.rating || '') + '</span>' +
-    (x.p === schMe ? ' <span class="badge">自分</span>' : '') + (playing ? ' <span class="badge warn">試合中</span>' : '') + '</div>';
+    (x.p === schMe ? ' <span class="badge">自分</span>' : '') + (playing ? ' <span class="badge warn">試合中</span>' : '') +
+    (x.via ? '<span class="schvia">試合で追加</span>' : '') + '</div>';
   // 希望場所・希望形式・ひとことは1つの枠に1行でまとめる（指定のあるものだけ。長いときは折り返す）
   var pf = (x.place !== SCH_ANY ? '<i><em>場所</em>' + esc(placeText(x)) + '</i>' : '') + (x.format !== 'どちらでも' ? '<i><em>形式</em>' + esc(x.format) + '</i>' : '') +
-    (x.comment ? '<i><em>ひとこと</em>' + esc(x.comment) + '</i>' : '');
+    (x.comment ? '<i><em>ひとこと</em>' + esc(x.comment) + '</i>' : '') +
+    schGearList().filter(function (g) { return schHasGear(x, g.key); }).map(function (g) { return '<i>' + esc(g.label.replace(/^モルックの/, '')) + 'あり</i>'; }).join('');
   if (pf) b += '<div class="schbox schpf">' + pf + '</div>';
   return b + '</div>';
 }
@@ -1423,6 +1442,11 @@ function schDetail() {
   var mine = schMine(o.d, o.h);
   var b = '';
   if (!list.length) b += '<p class="muted">まだ誰も参加していません。</p>';
+  else if (schSetKey()) {
+    var gn = schGearCount(list), gs = esc(schGearShort());
+    if (gn) b += '<p class="schgearn"><b>' + gs + 'あり ' + gn + '人</b></p>';
+    else if (list.length >= 2) b += '<p class="schgearn muted">' + gs + 'を持っていく人がいません</p>';
+  }
   list.forEach(function (x) {
     b += schPerson(x, o.fresh[x.p], now && busy[x.p]);
   });
@@ -1444,6 +1468,10 @@ function schPlaceEditor(f) {
   if (f.place.indexOf(SCH_OTHER) >= 0) h += '<input type="text" id="schOther" maxlength="20" placeholder="場所を入力（20字まで）" value="' + esc(f.other) + '">';
   h += '</div>';
   h += '<div class="schfld"><span>希望形式</span><div class="seg">' + SCH_FORMATS.map(function (x) { return '<button data-sformat="' + x + '" class="' + (f.format === x ? 'on' : '') + '">' + x + '</button>'; }).join('') + '</div></div>';
+  var gl = schGearList();
+  if (gl.length) h += '<div class="schfld"><span>持ち物</span><div class="schchips">' + gl.map(function (g) {
+    return '<button class="schchip' + ((f.gear || []).indexOf(g.key) >= 0 ? ' on' : '') + '" data-sgear="' + esc(g.key) + '">' + esc(g.label) + (g.key === 'set' ? 'を持っていく' : '') + '</button>';
+  }).join('') + '</div></div>';
   h += '<div class="schfld"><span>ひとこと <small class="muted">（任意・100字まで）</small></span><textarea id="schComment" maxlength="100" rows="2">' + esc(f.comment) + '</textarea></div>';
   return h;
 }
@@ -1520,7 +1548,7 @@ function schBulkView() {
 
 // 編集の単位: 同じ日で、続いていて、内容が同じ時間のまとまり（過ぎた時間は含めない）
 function schGroup(d, h) {
-  var me = schMine(d, h), same = function (x) { return x && x.place === me.place && x.other === me.other && x.format === me.format && x.comment === me.comment; };
+  var me = schMine(d, h), same = function (x) { return x && x.place === me.place && x.other === me.other && x.format === me.format && x.comment === me.comment && (x.gear || '') === (me.gear || ''); };
   var a = h, z = h;
   while (a - 1 >= SCH.day_start && !slotPast(d, a - 1) && same(schMine(d, a - 1))) a--;
   while (z + 1 <= SCH.day_end && same(schMine(d, z + 1))) z++;
@@ -1551,13 +1579,13 @@ function schNewForm(d, from, to) {
   var hs = schHours().filter(function (h) { return h >= from && h <= to && !slotPast(d, h); });
   if (!hs.length) return;
   schOpen = schBulk = null;
-  schForm = { mode: 'new', d: d, from: hs[0], to: hs[hs.length - 1], orig: [], place: [], other: '', format: 'どちらでも', comment: '' };
+  schForm = { mode: 'new', d: d, from: hs[0], to: hs[hs.length - 1], orig: [], place: [], other: '', format: 'どちらでも', comment: '', gear: [] };
   render();
 }
 function schPayloadBase(f) {
   var other = document.getElementById('schOther'), cm = document.getElementById('schComment');
   if (other) f.other = other.value; if (cm) f.comment = cm.value;
-  return { player_id: schMe, place: f.place, place_other: f.other, format: f.format, comment: f.comment, device: deviceId() };
+  return { player_id: schMe, place: f.place, place_other: f.other, format: f.format, comment: f.comment, gear: f.gear || [], device: deviceId() };
 }
 function schSend(action, payload, okMsg) {
   schSending++; showSendNotice();
@@ -1599,7 +1627,7 @@ function schDragEnd() {
 function schSelForm() {
   if (!schMe) { toast('先に自分の名前を選んでください', true); return; }
   schOpen = schBulk = null;
-  schForm = { mode: 'sel', place: [], other: '', format: 'どちらでも', comment: '' };
+  schForm = { mode: 'sel', place: [], other: '', format: 'どちらでも', comment: '', gear: [] };
   render();
 }
 var mainEl = document.getElementById('main');
@@ -1637,6 +1665,7 @@ mainEl.addEventListener('change', function (e) {
   if (id === 'schPlace') { schF.place = e.target.value; render(); return; }
   if (id === 'schFormat') { schF.format = e.target.value; render(); return; }
   if (id === 'schMineOnly') { schF.mine = e.target.checked; render(); return; }
+  if (id === 'schGearOnly') { schF.gear = e.target.checked; render(); return; }
   if (id === 'schFrom' || id === 'schTo') { schPayloadBase(schForm); var a = Number(document.getElementById('schFrom').value), z = Number(document.getElementById('schTo').value); schForm.from = a; schForm.to = Math.max(a, z); render(); return; }
   if (id === 'sbFrom' || id === 'sbTo') { schPayloadBase(schBulk); var a2 = Number(document.getElementById('sbFrom').value), z2 = Number(document.getElementById('sbTo').value); schBulk.from = a2; schBulk.to = Math.max(a2, z2); render(); return; }
   if (id === 'sbOver') { schPayloadBase(schBulk); schBulk.overwrite = e.target.checked; render(); return; }
@@ -1645,7 +1674,7 @@ mainEl.addEventListener('click', function (e) {
   if (tab !== 'sched' && !e.target.closest('[data-schcands]')) return;
   var c = e.target.closest('[data-schcands]');
   if (c) { e.preventDefault(); schCands = null; render(); return; }
-  var t = e.target.closest('td[data-sd],[data-smode],[data-sselgo],[data-sselleave],[data-sselclear],[data-snew],[data-snewslot],[data-snewback],[data-sday],[data-sbulk],[data-sclose],[data-sjoin],[data-sedit],[data-sleave],[data-splay],[data-splace],[data-sformat],[data-ssave],[data-sq],[data-sbd],[data-sbsave]');
+  var t = e.target.closest('td[data-sd],[data-smode],[data-sselgo],[data-sselleave],[data-sselclear],[data-snew],[data-snewslot],[data-snewback],[data-sday],[data-sbulk],[data-sclose],[data-sjoin],[data-sedit],[data-sleave],[data-splay],[data-splace],[data-sformat],[data-sgear],[data-ssave],[data-sq],[data-sbd],[data-sbsave]');
   if (!t) return;
   var d = t.dataset;
   if (d.sclose !== undefined && t.classList.contains('schov') && e.target !== t) return; // シートの中の操作は閉じない
@@ -1676,7 +1705,7 @@ mainEl.addEventListener('click', function (e) {
   if (d.sedit) {
     var g = schGroup(schOpen.d, schOpen.h), orig = [];
     for (var hh = g.from; hh <= g.to; hh++) orig.push(hh);
-    schForm = { mode: 'edit', d: schOpen.d, from: g.from, to: g.to, orig: orig, place: g.x.place === SCH_ANY ? [] : g.x.place.split(','), other: g.x.other, format: g.x.format, comment: g.x.comment };
+    schForm = { mode: 'edit', d: schOpen.d, from: g.from, to: g.to, orig: orig, place: g.x.place === SCH_ANY ? [] : g.x.place.split(','), other: g.x.other, format: g.x.format, comment: g.x.comment, gear: g.x.gear ? g.x.gear.split(',') : [] };
     schOpen = null; render(); return;
   }
   if (d.sleave) { schSend('schedLeave', { player_id: schMe, items: [{ date: schOpen.d, hour: schOpen.h }], device: deviceId() }, function () { return '参加をやめました'; }); return; }
@@ -1691,6 +1720,7 @@ mainEl.addEventListener('click', function (e) {
     render(); return;
   }
   if (d.sformat && f) { schPayloadBase(f); f.format = d.sformat; render(); return; }
+  if (d.sgear && f) { schPayloadBase(f); f.gear = f.gear || []; var gi = f.gear.indexOf(d.sgear); if (gi >= 0) f.gear.splice(gi, 1); else f.gear.push(d.sgear); render(); return; }
   if (d.ssave && schForm.mode === 'sel') {
     var ps = schPayloadBase(schForm);
     ps.items = schSelList().map(function (x) { return { date: x.d, hour: x.h }; });
@@ -1705,7 +1735,7 @@ mainEl.addEventListener('click', function (e) {
     schSend('schedSet', p, function (r) { return schForm && schForm.mode === 'edit' ? '保存しました' : '参加しました（' + ((r.added || 0) + (r.updated || 0)) + '時間）'; });
     return;
   }
-  if (d.sbulk) { if (!schMe) return; schOpen = schForm = null; schBulk = { dates: {}, from: Math.min(18, SCH.day_end), to: SCH.day_end, place: [], other: '', format: 'どちらでも', comment: '', overwrite: false }; render(); return; }
+  if (d.sbulk) { if (!schMe) return; schOpen = schForm = null; schBulk = { dates: {}, from: Math.min(18, SCH.day_end), to: SCH.day_end, place: [], other: '', format: 'どちらでも', comment: '', gear: [], overwrite: false }; render(); return; }
   if (d.sq) {
     schPayloadBase(schBulk);
     SCH.dates.forEach(function (dd) { if (slotPast(dd, SCH.day_end)) return; schBulk.dates[dd] = d.sq === 'all' || (d.sq === 'wd' && !dWeekend(dd)) || (d.sq === 'we' && dWeekend(dd)); });
@@ -1738,7 +1768,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#virtualStartSave,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#schedAutoToggle,#virtualStartSave,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
@@ -1797,6 +1827,7 @@ document.getElementById('main').addEventListener('click', function (e) {
     return;
   }
   if (t.id === 'adminLogin') { var k = document.getElementById('adminKey').value; call('adminCheck', { admin_key: k }).then(function () { adminKey = k; render(); }).catch(function (er) { toast(er.message || er, true); }); return; }
+  if (t.id === 'schedAutoToggle') { var ao = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'sched_auto_join', value: ao }, ao ? '試合開始で日程に自動追加します' : '自動追加をやめました'); return; }
   if (t.id === 'schedToggle') { var so = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'sched_visible', value: so }, so ? '日程タブを表示します' : '日程タブを非表示にしました'); return; }
   if (t.id === 'virtualToggle') { var on = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'virtual_rating_visible', value: on }, on ? '参考レートを表示します' : '参考レートを非表示にしました'); return; }
   if (t.id === 'virtualStartSave') { var vs = document.getElementById('virtualStart').value.trim(); act('adminSetting', { admin_key: adminKey, key: 'virtual_initial_rating', value: vs }, vs === '' ? '参考レートを固定レートから始めます' : '参考レートを ' + vs + ' から始めます'); return; }
