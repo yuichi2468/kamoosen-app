@@ -285,7 +285,14 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .schhead .row { gap: 8px; }
 .schhead select { flex: 1; min-width: 0; }
 .schfilter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
-.schfilter select { font-size: 13px; padding: 5px 6px; }
+.schfilter select { flex: 0 0 auto; font-size: 13px; padding: 5px 6px; }
+.schflabel { font-size: 13px; font-weight: 700; margin-right: 2px; }
+.schng { border-top: 1px solid var(--line); padding-top: 4px; margin-top: 6px; }
+.schsh + .schng { border-top: 0; margin-top: 0; }
+.schngh { display: flex; justify-content: space-between; align-items: center; width: 100%; border: 0; background: none; padding: 6px 0 2px; font-size: 15px; font-weight: 700; color: var(--ink); cursor: pointer; text-align: left; }
+.schngh small { font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.schng .schp { border-top: 0; padding: 4px 0 6px; }
+.schback { border: 0; background: none; color: var(--muted); font-size: 14px; padding: 0 0 6px; cursor: pointer; }
 .schmine { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
 .schnew { display: inline-block; margin-top: 10px; border: 0; border-radius: 999px; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 700; padding: 5px 12px; cursor: pointer; }
 .schcard { padding: 10px 8px; }
@@ -1257,7 +1264,7 @@ var SCH = null, schOff = 0, schLoading = false;     // 日程のデータ、サ�
 var schMe = store('kamo_sched_me') || '';            // この端末で日程を使う人
 var schStart = null;                                  // 時間割の左端の日（dates の番号）
 var schF = { place: '', format: '', mine: false };    // 絞り込み
-var schOpen = null;   // マスの詳細 { d, h, fresh: {player_id: 1} }
+var schOpen = null;   // マスの詳細 { d, h, fresh: {player_id: 1}, back: 新着一覧 } / 新着の一覧 { news: [参加] }
 var schForm = null;   // 参加の入力 { mode: 'new'|'edit', d, from, to, orig: [時], place: [], other, format, comment }
 var schBulk = null;   // まとめて追加 { dates: {}, from, to, place: [], other, format, comment, overwrite }
 var schSending = 0;
@@ -1333,7 +1340,7 @@ function viewSched() {
     act.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === schMe ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select></div>';
   if (!schMe) h += '<p class="muted" style="margin:6px 0 0">はじめに自分の名前を選んでください（この端末に覚えておきます）。</p>';
   // 絞り込み
-  h += '<div class="schfilter"><select id="schPlace"><option value="">場所: すべて</option>' + SCH.places.concat([SCH_OTHER]).map(function (p) { return '<option' + (schF.place === p ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select>' +
+  h += '<div class="schfilter"><span class="schflabel">絞り込み</span><select id="schPlace"><option value="">場所: すべて</option>' + SCH.places.concat([SCH_OTHER]).map(function (p) { return '<option' + (schF.place === p ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select>' +
     '<select id="schFormat"><option value="">形式: すべて</option>' + ['個人戦', 'チーム戦'].map(function (p) { return '<option' + (schF.format === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
     '<label class="schmine"><input type="checkbox" id="schMineOnly"' + (schF.mine ? ' checked' : '') + '> 自分のみ</label></div>';
   var fresh = schFresh();
@@ -1384,26 +1391,44 @@ function schGrid(fresh) {
 function schSheet(title, body) {
   return '<div class="schov" data-sclose="1"><div class="schsheet" role="dialog" aria-modal="true"><div class="schsh"><b>' + title + '</b><button class="schx" data-sclose="1" aria-label="閉じる">×</button></div>' + body + '</div></div>';
 }
+// 参加者1人分（名前・レートと、指定のある項目だけの枠）
+function schPerson(x, isNew, playing) {
+  var p = P(x.p);
+  var b = '<div class="schp"><div class="schpn">' + (isNew ? '<span class="newb">新</span>' : '') + '<b>' + esc(p.name) + '</b> <span class="muted">' + (p.rating || '') + '</span>' +
+    (x.p === schMe ? ' <span class="badge">自分</span>' : '') + (playing ? ' <span class="badge warn">試合中</span>' : '') + '</div>';
+  if (x.place !== SCH_ANY) b += '<div class="schbox"><span>希望場所</span>' + esc(placeText(x)) + '</div>';
+  if (x.format !== 'どちらでも') b += '<div class="schbox"><span>希望形式</span>' + esc(x.format) + '</div>';
+  if (x.comment) b += '<div class="schbox"><span>ひとこと</span>' + esc(x.comment) + '</div>';
+  return b + '</div>';
+}
+// 新着の一覧: 新着をマス（日・時間）ごとにまとめて全部見せる。マスの見出しをタップでそのマスの詳細へ
+function schNewsView() {
+  var news = schOpen.news, groups = [], by = {}, busy = busySet();
+  news.forEach(function (x) { var k = schKey(x.d, x.h); if (!by[k]) { by[k] = { d: x.d, h: x.h, list: [] }; groups.push(by[k]); } by[k].list.push(x); });
+  var b = '';
+  groups.forEach(function (g) {
+    var all = (SCH.by[schKey(g.d, g.h)] || []).length;
+    b += '<div class="schng"><button class="schngh" data-snewslot="' + g.d + '" data-sh="' + g.h + '">' + dLabel(g.d) + ' ' + g.h + '時台<small>参加 ' + all + '人 ›</small></button>' +
+      g.list.map(function (x) { return schPerson(x, true, slotNow(g.d, g.h) && busy[x.p]); }).join('') + '</div>';
+  });
+  return schSheet('新着 ' + news.length + '件', b);
+}
 function schDetail() {
+  if (schOpen.news) return schNewsView();
   var o = schOpen, list = (SCH.by[schKey(o.d, o.h)] || []).slice(), busy = busySet(), now = slotNow(o.d, o.h), past = slotPast(o.d, o.h);
   list.sort(function (a, b) { return (a.p === schMe ? -1 : b.p === schMe ? 1 : 0) || a.c - b.c; });
   var mine = schMine(o.d, o.h);
   var b = '';
   if (!list.length) b += '<p class="muted">まだ誰も参加していません。</p>';
   list.forEach(function (x) {
-    var p = P(x.p);
-    b += '<div class="schp"><div class="schpn">' + (o.fresh[x.p] ? '<span class="newb">新</span>' : '') + '<b>' + esc(p.name) + '</b> <span class="muted">' + (p.rating || '') + '</span>' +
-      (x.p === schMe ? ' <span class="badge">自分</span>' : '') + (now && busy[x.p] ? ' <span class="badge warn">試合中</span>' : '') + '</div>';
-    if (x.place !== SCH_ANY) b += '<div class="schbox"><span>希望場所</span>' + esc(placeText(x)) + '</div>';
-    if (x.format !== 'どちらでも') b += '<div class="schbox"><span>希望形式</span>' + esc(x.format) + '</div>';
-    if (x.comment) b += '<div class="schbox"><span>ひとこと</span>' + esc(x.comment) + '</div>';
-    b += '</div>';
+    b += schPerson(x, o.fresh[x.p], now && busy[x.p]);
   });
   if (!past && schMe) {
     b += '<div class="schbtns">' + (mine ? '<button class="btn" data-sedit="1">編集</button><button class="btn danger" data-sleave="1">参加をやめる</button>' : '<button class="btn" data-sjoin="1">参加する</button>') + '</div>';
   } else if (!schMe) b += '<p class="muted">参加するには、上で自分の名前を選んでください。</p>';
   else b += '<p class="muted">過ぎた時間です（見るだけ）。</p>';
   if (!past && list.length >= 2) b += '<button class="btn ghost schplay" data-splay="1">このメンバーで試合を始める</button>';
+  if (o.back) b = '<button class="schback" data-snewback="1">‹ 新着の一覧へ戻る</button>' + b;
   return schSheet(dLabel(o.d) + ' ' + o.h + '時台', b);
 }
 
@@ -1498,13 +1523,25 @@ function schGroup(d, h) {
   while (z + 1 <= SCH.day_end && same(schMine(d, z + 1))) z++;
   return { from: a, to: z, x: me };
 }
-function schOpenSlot(d, h) {
-  var seen = schSeen(), fresh = {};
-  schFresh().forEach(function (x) { if (x.d === d && x.h === h) fresh[x.p] = 1; });
-  seen[schKey(d, h)] = schNow();
+function schMarkSeen(keys) {
+  var seen = schSeen(), t = schNow();
+  keys.forEach(function (k) { seen[k] = t; });
   var first = SCH.dates[0]; Object.keys(seen).forEach(function (k) { if (k < first) delete seen[k]; });
   schSeenSave(seen);
-  schOpen = { d: d, h: h, fresh: fresh }; schForm = schBulk = null; render();
+}
+// back: 新着の一覧から開いたとき、その一覧（「新」はその一覧のものを使い、戻れるようにする）
+function schOpenSlot(d, h, back) {
+  var fresh = {};
+  (back || schFresh()).forEach(function (x) { if (x.d === d && x.h === h) fresh[x.p] = 1; });
+  schMarkSeen([schKey(d, h)]);
+  schOpen = { d: d, h: h, fresh: fresh, back: back || null }; schForm = schBulk = null; render();
+}
+// 新着の一覧を開く。一覧に出したものは全部「見た」扱い（一覧を開いている間は「新」を付けたまま）
+function schOpenNews() {
+  var news = schFresh();
+  if (!news.length) return;
+  schMarkSeen(news.map(function (x) { return schKey(x.d, x.h); }));
+  schOpen = { news: news }; schForm = schBulk = null; render();
 }
 function schNewForm(d, from, to) {
   if (!schMe) { toast('先に自分の名前を選んでください', true); return; }
@@ -1612,7 +1649,7 @@ mainEl.addEventListener('click', function (e) {
   if (tab !== 'sched' && !e.target.closest('[data-schcands]')) return;
   var c = e.target.closest('[data-schcands]');
   if (c) { e.preventDefault(); schCands = null; render(); return; }
-  var t = e.target.closest('td[data-sd],[data-smode],[data-sselgo],[data-sselleave],[data-sselclear],[data-snew],[data-sday],[data-sbulk],[data-sclose],[data-sjoin],[data-sedit],[data-sleave],[data-splay],[data-splace],[data-sformat],[data-ssave],[data-sq],[data-sbd],[data-sbsave]');
+  var t = e.target.closest('td[data-sd],[data-smode],[data-sselgo],[data-sselleave],[data-sselclear],[data-snew],[data-snewslot],[data-snewback],[data-sday],[data-sbulk],[data-sclose],[data-sjoin],[data-sedit],[data-sleave],[data-splay],[data-splace],[data-sformat],[data-ssave],[data-sq],[data-sbd],[data-sbsave]');
   if (!t) return;
   var d = t.dataset;
   if (d.sclose !== undefined && t.classList.contains('schov') && e.target !== t) return; // シートの中の操作は閉じない
@@ -1634,7 +1671,9 @@ mainEl.addEventListener('click', function (e) {
     schSend('schedLeave', { player_id: schMe, items: lv.map(function (x) { return { date: x.d, hour: x.h }; }), device: deviceId() }, function (r) { schSel = {}; return (r.removed || 0) + '時間の参加をやめました'; });
     return;
   }
-  if (d.snew) { var fr = schFresh()[0]; if (fr) { var i = SCH.dates.indexOf(fr.d), cols = schCols(); if (i < schStart || i >= schStart + cols) schStart = i; schOpenSlot(fr.d, fr.h); } return; }
+  if (d.snew) { schOpenNews(); return; }
+  if (d.snewslot) { var nb = schOpen && schOpen.news, sh = Number(d.sh), i = SCH.dates.indexOf(d.snewslot), cols = schCols(); if (i >= 0 && (i < schStart || i >= schStart + cols)) schStart = i; schOpenSlot(d.snewslot, sh, nb); return; }
+  if (d.snewback) { if (schOpen && schOpen.back) { schOpen = { news: schOpen.back }; render(); } return; }
   if (d.sday) { schStart = Math.max(0, schStart + Number(d.sday)); render(); return; }
   if (d.sclose) { schOpen = schForm = schBulk = null; render(); return; }
   if (d.sjoin) { schNewForm(schOpen.d, schOpen.h, schOpen.h); return; }
