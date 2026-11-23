@@ -92,7 +92,8 @@ const cell = (d, h) => '#schGrid td[data-sd="' + d + '"][data-sh="' + h + '"]';
   const det = await page.textContent('.schsheet');
   if (!/高原・飛鳥井/.test(det) || !/チーム戦/.test(det) || !/18時半/.test(det) || !/その他: 体育館・鴨川南|鴨川南・その他: 体育館/.test(det)) fail('詳細の項目: ' + det);
   const boxes = await page.$$eval('.schsheet .schbox', l => l.length);
-  if (boxes !== 4) fail('指定のある項目だけ出ていない: ' + boxes); // 青木 高原 / 石田 チーム戦・高原飛鳥井・ひとこと / 上野? → 石田(P02)3 + 青木1 + 上野(P03)1
+  if (boxes !== 3) fail('指定のある項目だけ出ていない: ' + boxes);
+  if (!/場所高原・飛鳥井\s*形式チーム戦\s*ひとこと18時半ごろ着きます/.test(await page.$eval('.schsheet .schpf >> nth=1', e => e.textContent).catch(() => ''))) fail('場所・形式・ひとことが1つの枠にない'); // 青木 高原 / 石田 チーム戦・高原飛鳥井・ひとこと / 上野? → 石田(P02)3 + 青木1 + 上野(P03)1
   await page.screenshot({ path: path.join(out, 's3_detail_new.png') });
   // 戻ると一覧のまま。閉じると全部「見た」扱い
   await page.click('[data-snewback]');

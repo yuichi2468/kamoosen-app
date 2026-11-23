@@ -1398,10 +1398,10 @@ function schPerson(x, isNew, playing) {
   var p = P(x.p);
   var b = '<div class="schp"><div class="schpn">' + (isNew ? '<span class="newb">新</span>' : '') + '<b>' + esc(p.name) + '</b> <span class="muted">' + (p.rating || '') + '</span>' +
     (x.p === schMe ? ' <span class="badge">自分</span>' : '') + (playing ? ' <span class="badge warn">試合中</span>' : '') + '</div>';
-  // 希望場所と希望形式は1行にまとめる（指定のあるものだけ）
-  var pf = (x.place !== SCH_ANY ? '<i><em>場所</em>' + esc(placeText(x)) + '</i>' : '') + (x.format !== 'どちらでも' ? '<i><em>形式</em>' + esc(x.format) + '</i>' : '');
+  // 希望場所・希望形式・ひとことは1つの枠に1行でまとめる（指定のあるものだけ。長いときは折り返す）
+  var pf = (x.place !== SCH_ANY ? '<i><em>場所</em>' + esc(placeText(x)) + '</i>' : '') + (x.format !== 'どちらでも' ? '<i><em>形式</em>' + esc(x.format) + '</i>' : '') +
+    (x.comment ? '<i><em>ひとこと</em>' + esc(x.comment) + '</i>' : '');
   if (pf) b += '<div class="schbox schpf">' + pf + '</div>';
-  if (x.comment) b += '<div class="schbox"><span>ひとこと</span>' + esc(x.comment) + '</div>';
   return b + '</div>';
 }
 // 新着の一覧: 新着をマス（日・時間）ごとにまとめて全部見せる。マスの見出しをタップでそのマスの詳細へ
