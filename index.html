@@ -1469,9 +1469,13 @@ function schPlaceEditor(f) {
   h += '</div>';
   h += '<div class="schfld"><span>希望形式</span><div class="seg">' + SCH_FORMATS.map(function (x) { return '<button data-sformat="' + x + '" class="' + (f.format === x ? 'on' : '') + '">' + x + '</button>'; }).join('') + '</div></div>';
   var gl = schGearList();
-  if (gl.length) h += '<div class="schfld"><span>持ち物</span><div class="schchips">' + gl.map(function (g) {
-    return '<button class="schchip' + ((f.gear || []).indexOf(g.key) >= 0 ? ' on' : '') + '" data-sgear="' + esc(g.key) + '">' + esc(g.label) + (g.key === 'set' ? 'を持っていく' : '') + '</button>';
-  }).join('') + '</div></div>';
+  // 持ち物は項目ごとに「◯◯あり／◯◯なし」の二択（既定はなし）
+  gl.forEach(function (g) {
+    var on = (f.gear || []).indexOf(g.key) >= 0, sh = esc(g.label.replace(/^モルックの/, ''));
+    h += '<div class="schfld"><span>' + esc(g.label) + '</span><div class="seg">' +
+      '<button data-sgear="' + esc(g.key) + '" data-son="1" class="' + (on ? 'on' : '') + '">' + sh + 'あり</button>' +
+      '<button data-sgear="' + esc(g.key) + '" data-son="0" class="' + (on ? '' : 'on') + '">' + sh + 'なし</button></div></div>';
+  });
   h += '<div class="schfld"><span>ひとこと <small class="muted">（任意・100字まで）</small></span><textarea id="schComment" maxlength="100" rows="2">' + esc(f.comment) + '</textarea></div>';
   return h;
 }
@@ -1720,7 +1724,7 @@ mainEl.addEventListener('click', function (e) {
     render(); return;
   }
   if (d.sformat && f) { schPayloadBase(f); f.format = d.sformat; render(); return; }
-  if (d.sgear && f) { schPayloadBase(f); f.gear = f.gear || []; var gi = f.gear.indexOf(d.sgear); if (gi >= 0) f.gear.splice(gi, 1); else f.gear.push(d.sgear); render(); return; }
+  if (d.sgear && f) { schPayloadBase(f); f.gear = (f.gear || []).filter(function (k) { return k !== d.sgear; }); if (d.son === '1') f.gear.push(d.sgear); render(); return; }
   if (d.ssave && schForm.mode === 'sel') {
     var ps = schPayloadBase(schForm);
     ps.items = schSelList().map(function (x) { return { date: x.d, hour: x.h }; });
