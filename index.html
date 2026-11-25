@@ -34,7 +34,7 @@ th, td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: lef
 th { font-size: 12px; color: var(--muted); font-weight: 600; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.zone td { background: var(--accent-soft); }
-tr.cut td { border-bottom: 2px dashed var(--accent); }
+tr.cut td { border-bottom: 3px solid var(--accent); }
 .scroll { overflow-x: auto; }
 a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--line); color: var(--ink); margin-left: 4px; }
@@ -110,18 +110,22 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .sctabs button { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 13px; }
 .sctabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .sctwrap { margin-top: 6px; }
-.sctwrap.live { max-height: 232px; overflow-y: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; }
+.sctwrap.live { max-height: 300px; overflow-y: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; }
 .sctitle { font-weight: 700; margin: 12px 0 4px; font-size: 14px; }
 .sct { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; }
-.sct th, .sct td { border: 1px solid #9aa19d; text-align: center; padding: 3px 2px; white-space: normal; }
-.sct thead th { background: rgba(120,120,140,.12); font-size: 12px; font-weight: 600; position: sticky; top: 0; }
-.sct thead tr:first-child th { font-size: 13px; font-weight: 700; }
+.sct th, .sct td { border: 1px solid #9aa19d; text-align: center; padding: 3px 1px; white-space: normal; }
+.sct thead th { background: var(--card); font-size: 12px; font-weight: 600; position: sticky; top: 0; z-index: 1; box-shadow: inset 0 0 0 999px rgba(120,120,140,.12); }
+.sct thead tr:first-child th { font-size: 13px; font-weight: 700; height: 25px; }
 .sct thead tr:nth-child(2) th { top: 25px; }
-.sct th.tcol { width: 3.2em; }
+.sct col.tcol { width: 1.8em; }
+.sct col.totcol { width: 2.4em; }
+.sct th.tsep, .sct td.tsep { border-left: 3px double #9aa19d; }
+.sct th.pname { vertical-align: top; padding: 4px 0; font-size: 12px; line-height: 1.15; }
+.sct th.pnone { font-size: 11px; }
+.sct td.tno { color: var(--muted); font-size: 12px; }
 .sct tbody tr:nth-child(even) td { background: rgba(120,120,120,.08); }
 .sct td.pt { font-size: 15px; }
-.sct td.pt small { display: block; font-size: 10px; color: var(--muted); line-height: 1.1; }
-.sct td.tot { font-size: 18px; font-weight: 800; }
+.sct td.tot { font-size: 17px; font-weight: 800; }
 .sct td.tot small { display: block; font-size: 10px; font-weight: 600; }
 .sct tbody tr td.c-ok { background: rgba(59,130,246,.20); }
 .sct tbody tr td.c-m1 { background: rgba(234,179,8,.30); }
@@ -611,18 +615,17 @@ window.addEventListener('beforeunload', function (e) { if (sendingWhat()) { e.pr
 /* ---- ランキング ---- */
 function viewRank() {
   var s = S.settings, q = n(s.qualify_count, 8);
-  var zoneCount = S.ranking.filter(function (r) { return r.qualify_zone; }).length;
+  // 上位 q 位（同点で q 位が並ぶときはその人まで）の下に区切り線を引く。最低条件を満たしているかは問わない
+  var topCount = S.ranking.filter(function (r) { return r.rank <= q; }).length;
   var h = '<div class="card"><h2>ランキング</h2><div class="scroll"><table class="rktable"><thead><tr><th class="num">順位</th><th>名前</th><th class="num">レート</th><th class="num">ボーナス</th><th class="num">合計</th><th class="num">試合数</th><th class="num">チーム戦</th></tr></thead><tbody>';
-  var seen = 0;
-  S.ranking.forEach(function (r) {
-    if (r.qualify_zone) seen++;
-    var cls = (r.qualify_zone ? 'zone' : '') + (r.qualify_zone && seen === zoneCount ? ' cut' : '');
+  S.ranking.forEach(function (r, i) {
+    var cls = (r.qualify_zone ? 'zone' : '') + (i === topCount - 1 && topCount < S.ranking.length ? ' cut' : '');
     h += '<tr class="' + cls + '"><td class="num">' + r.rank + '</td><td><a href="#" data-me="' + esc(r.player_id) + '">' + esc(r.name) + '</a>' + (r.playoff ? '<span class="badge warn">プレーオフ</span>' : '') + '</td>' +
       '<td class="num">' + r.rating + '</td><td class="num rkbonus">' + (r.bonus > 0 ? '+' : '') + r.bonus + '</td><td class="num"><b>' + r.total + '</b></td>' +
       '<td class="num">' + quotaCell(r.matches, n(s.min_matches, 15)) + '</td><td class="num">' + quotaCell(r.team_matches, n(s.min_team_matches, 5)) + '</td></tr>';
   });
   h += '</tbody></table></div>';
-  h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。色付きの行が通過圏内（上位' + q + '名）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
+  h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。太線より上が上位' + q + '名です（最低条件を満たしていない人も含みます）。色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
   if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + p.stats.matches + '試合 ' + p.stats.wins + '勝' + p.stats.losses + '敗' +
     (p.virtual_rating !== undefined && p.virtual_rating !== null ? '<br><span class="muted">変動した場合のレート（参考）: ' + p.virtual_rating + '</span>' : '') +
@@ -1086,27 +1089,45 @@ function scoreTable(st, m, leg, live) {
   var cols = [first, 3 - first], rows = [];
   L.forEach(function (r) { if (r.team === first || !rows.length) rows.push({}); rows[rows.length - 1][r.team] = r; });
   var teamIds = function (t) { return t === 1 ? m.team1 : m.team2; };
-  var showWho = function (t) { return m.use_order && teamIds(t).length > 1; };
+  // 選手ごとの列（そのセットの投擲順）。投擲順を入れていないチーム戦は、誰が投げたか分からないので「得点」の1列
+  var players = function (t) {
+    var ids = teamIds(t) || [];
+    if (!m.use_order && ids.length > 1) return [null];
+    var o = st.orders && st.orders[leg - 1] && st.orders[leg - 1][t - 1], list = (o && o.length ? o : ids).slice();
+    L.forEach(function (r) { if (r.team === t && r.player && list.indexOf(r.player) < 0) list.push(r.player); });
+    return list.length ? list : [null];
+  };
+  var pl = {}; cols.forEach(function (t) { pl[t] = players(t); });
+  var nCols = 1 + cols.reduce(function (a, t) { return a + pl[t].length + 1; }, 0);
   var nextT = live && !st.finished && st.leg === leg ? st.nextTeam : null;
-  var h = '<table class="sct"><thead><tr><th class="tcol"></th>' + cols.map(function (t) {
-    return '<th colspan="2" style="color:var(--t' + t + ')">' + (nextT === t ? '▼ ' : '') + names(teamIds(t)) + '</th>';
-  }).join('') + '</tr><tr><th>ターン</th>' + cols.map(function () { return '<th>得点</th><th>合計</th>'; }).join('') + '</tr></thead><tbody>';
-  if (!rows.length) h += '<tr><td colspan="5" class="muted">まだ投げていません</td></tr>';
+  var h = '<table class="sct"><colgroup><col class="tcol">' + cols.map(function (t) {
+    return pl[t].map(function () { return '<col>'; }).join('') + '<col class="totcol">';
+  }).join('') + '</colgroup><thead><tr><th class="tcol" rowspan="2"></th>' + cols.map(function (t, ci) {
+    return '<th colspan="' + pl[t].length + '" class="tname' + (ci ? ' tsep' : '') + '" style="color:var(--t' + t + ')">' + (nextT === t ? '▼ ' : '') + 'チーム' + t + '</th><th class="totcol" rowspan="2">計</th>';
+  }).join('') + '</tr><tr>' + cols.map(function (t, ci) {
+    return pl[t].map(function (id, i) {
+      var sep = ci && !i ? ' tsep' : '';
+      return id ? '<th class="pname' + sep + '">' + Array.from(String(P(id).name)).map(esc).join('<br>') + '</th>' : '<th class="pnone' + sep + '">得点</th>';
+    }).join('');
+  }).join('') + '</tr></thead><tbody>';
+  if (!rows.length) h += '<tr><td colspan="' + nCols + '" class="muted">まだ投げていません</td></tr>';
   rows.forEach(function (row, i) {
-    h += '<tr><td>' + (i + 1) + '</td>' + cols.map(function (t) {
-      var r = row[t];
-      if (!r) return '<td class="pt"></td><td class="tot"></td>';
-      var pt = r.kind === 'normal' ? r.points : '-';
-      var who = showWho(t) && r.player ? '<small>' + esc(P(r.player).name) + '</small>' : '';
+    h += '<tr><td class="tno">' + (i + 1) + '</td>' + cols.map(function (t, ci) {
+      var r = row[t], at = r ? Math.max(0, pl[t].indexOf(r.player || null)) : -1;
+      var cells = pl[t].map(function (id, j) {
+        var sep = ci && !j ? ' tsep' : '';
+        return '<td class="pt' + sep + '">' + (j === at ? (r.kind === 'normal' ? r.points : '—') : '') + '</td>';
+      }).join('');
+      if (!r) return cells + '<td class="tot"></td>';
       var c = r.event === 'win' ? 'c-win' : r.event === 'out' ? 'c-out' : r.event === 'bust' ? 'c-bust' : r.kind !== 'normal' ? (r.miss_streak >= 2 ? 'c-m2' : 'c-m1') : 'c-ok';
       var tot = r.event === 'out' ? '0<small>失格</small>' : r.score_after;
-      return '<td class="pt">' + pt + who + '</td><td class="tot ' + c + '">' + tot + '</td>';
+      return cells + '<td class="tot ' + c + '">' + tot + '</td>';
     }).join('') + '</tr>';
   });
   return h + '</tbody></table>';
 }
 function scoreLegend() {
-  return '<div class="sclegend muted"><span>左の列が先攻</span>' + [['rgba(234,179,8,.5)', '1ミス'], ['rgba(239,68,68,.45)', '2ミス連続'], ['rgba(153,27,27,.7)', '失格'], ['rgba(249,115,22,.55)', 'バースト'], ['rgba(34,197,94,.55)', '上がり']]
+  return '<div class="sclegend muted"><span>左のチームが先攻・—はミス</span>' + [['rgba(234,179,8,.5)', '1ミス'], ['rgba(239,68,68,.45)', '2ミス連続'], ['rgba(153,27,27,.7)', '失格'], ['rgba(249,115,22,.55)', 'バースト'], ['rgba(34,197,94,.55)', '上がり']]
     .map(function (x) { return '<span><i style="background:' + x[0] + '"></i>' + x[1] + '</span>'; }).join('') + '</div>';
 }
 // 全セットの表を上から並べる（試合終了・履歴）
