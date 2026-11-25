@@ -87,6 +87,8 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .hmside { min-width: 0; }
 .hmside.t2 { text-align: right; }
 .hmside .ba span { display: block; margin-right: 0; }
+.ba .vba { color: var(--accent); white-space: normal; }
+.ba .vba i { font-style: normal; white-space: nowrap; display: inline-block; }
 .hmname { font-size: 15px; }
 .hmside.t1 .hmname { color: var(--t1); } .hmside.t2 .hmname { color: var(--t2); }
 .hmside.win .hmname { font-weight: 800; }
@@ -617,7 +619,8 @@ function viewRank() {
   h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。色付きの行が通過圏内（上位' + q + '名）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 20) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
   if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + p.stats.matches + '試合 ' + p.stats.wins + '勝' + p.stats.losses + '敗' +
-    (p.virtual_rating !== undefined && p.virtual_rating !== null ? '<br><span class="muted">変動した場合のレート（参考）: ' + p.virtual_rating + '</span>' : '') + '</p>'; }).join('') + '</div>';
+    (p.virtual_rating !== undefined && p.virtual_rating !== null ? '<br><span class="muted">変動した場合のレート（参考）: ' + p.virtual_rating + '</span>' : '') +
+    (p.virtual_total ? '<br><span class="muted">参考合計（参考レート＋ボーナス）: </span><b>' + p.virtual_total.total + '</b> ' + vtBadge(p.virtual_total) : '') + '</p>'; }).join('') + '</div>';
   return h;
 }
 
@@ -626,6 +629,18 @@ function virtualLine(p) {
   if (!p.fixed || p.virtual_rating === undefined || p.virtual_rating === null) return '';
   var st0 = S.settings.virtual_initial_rating, start = st0 === null || st0 === undefined ? p.rating : st0, d = p.virtual_rating - start;
   return '<div class="heroproj"><span class="muted">変動した場合（参考）</span> <b>' + p.virtual_rating + '</b> <span class="muted">（' + (start !== p.rating ? start + ' から ' : '') + (d > 0 ? '+' : '') + d + '）</span></div>';
+}
+
+// レート固定の人の参考合計の最低試合数の印（達成 / 暫定・あと◯試合）
+function vtBadge(vt) { return vt.eligible ? '<span class="badge ok">達成</span>' : '<span class="badge">暫定・あと' + (vt.min - vt.matches) + '試合</span>'; }
+// 個人ページの名前のカード（レート固定の人）: 参考合計 → 参考レート＋ボーナス → 公式のレート（固定）
+function virtualHero(p) {
+  var vt = p.virtual_total;
+  if (!vt) return '<div class="herorate"><span class="muted">レート</span> <b>' + p.rating + '</b> <span class="badge">固定</span></div>' + virtualLine(p);
+  var st0 = S.settings.virtual_initial_rating, start = st0 === null || st0 === undefined ? p.rating : st0, d = vt.virtual_rating - start;
+  return '<div class="herorate"><span class="muted">参考合計</span> <b>' + vt.total + '</b> ' + vtBadge(vt) + '</div>' +
+    '<div class="heroproj"><span class="muted">参考レート</span> ' + vt.virtual_rating + ' <span class="muted">（' + (start !== p.rating ? start + ' から ' : '') + (d > 0 ? '+' : '') + d + '）＋ボーナス</span> <b>' + (vt.bonus < 0 ? vt.bonus : '+' + vt.bonus) + '</b></div>' +
+    '<div class="heroproj"><span class="muted">公式のレート</span> ' + p.rating + ' <span class="badge">固定</span></div>';
 }
 
 function quotaCell(have, need) { return have < need ? '<b class="short">' + have + '</b>' : '<b class="met">' + have + '<small>✓</small></b>'; }
@@ -1109,11 +1124,22 @@ function rateAt(id, mid) {
   if (histIndexOf !== S.history) { histIndex = {}; histIndexOf = S.history; Object.keys(S.history || {}).forEach(function (pid) { (S.history[pid] || []).forEach(function (x) { histIndex[pid + '|' + x.match_id] = x; }); }); }
   return histIndex[id + '|' + mid];
 }
+var vHistIndex = null, vHistIndexOf = null;
+function vRateAt(id, mid) {
+  var vh = S.virtual_history || {};
+  if (vHistIndexOf !== vh) { vHistIndex = {}; vHistIndexOf = vh; Object.keys(vh).forEach(function (pid) { (vh[pid] || []).forEach(function (x) { vHistIndex[pid + '|' + x.match_id] = x; }); }); }
+  return vHistIndex[id + '|' + mid];
+}
+// レート固定の人の参考レートの変動（例: 参考 1512 → 1530（+18））
+function vRateText(id, mid) {
+  var v = vRateAt(id, mid);
+  return v ? '<i>参考 ' + (v.rating - v.delta) + ' → ' + v.rating + '</i><i>（' + (v.delta > 0 ? '+' : '') + v.delta + '）</i>' : '';
+}
 function rateBA(m, ids) {
   if (m.status !== 'done') return '';
   var lines = ids.map(function (id) {
     var p = P(id), x = rateAt(id, m.id), nm = ids.length > 1 ? esc(p.name) + ' ' : '';
-    if (p.fixed) return nm + p.rating + '（固定）';
+    if (p.fixed) { var vt = vRateText(id, m.id); return nm + p.rating + '（固定）' + (vt ? '</span><span class="vba">' + vt : ''); }
     if (!x) return '';
     return nm + (x.rating - x.delta) + ' → ' + x.rating;
   }).filter(Boolean);
@@ -1195,7 +1221,7 @@ function viewMe() {
   h += '<div class="card hero"><div class="muted herotop">' + (p.fixed ? '前回王者（予選の順位対象外）' : r ? '予選 ' + (r.eligible ? '' : '暫定') + r.rank + '位 / ' + S.ranking.length + '名中' : '') + '</div>' +
     '<div class="heroname">' + esc(p.name) + '</div>' +
     (r ? '<div class="herorate"><span class="muted">合計</span> <b>' + r.total + '</b></div><div class="heroproj"><span class="muted">レート</span> ' + r.rating + ' <span class="muted">＋ボーナス</span> <b>' + (r.bonus < 0 ? r.bonus : '+' + r.bonus) + '</b>' + '</div>'
-         : '<div class="herorate"><span class="muted">レート</span> <b>' + p.rating + '</b>' + (p.fixed ? ' <span class="badge">固定</span>' : '') + '</div>' + virtualLine(p));
+         : p.fixed ? virtualHero(p) : '<div class="herorate"><span class="muted">レート</span> <b>' + p.rating + '</b></div>');
   var mine = myAwards(id);
   if (mine.length) h += '<div class="herobadges">' + mine.map(function (x) { return '<span class="badge award-b r' + x.rank + (x.prov ? ' prov' : '') + '">' + (['🎖', '🥇', '🥈', '🥉'][x.rank] || '🏅') + ' ' + esc(x.text) + '</span>'; }).join('') + '</div>';
   h += '</div>';
@@ -1213,14 +1239,19 @@ function viewMe() {
     tile('追加ボーナス', eb ? '+' + eb.total : '-', eb ? '' : '対象外') +
     '</div>';
 
-  // 4. 予選通過の最低条件
+  // 4. 予選通過の最低条件（レート固定の人は参考合計の最低試合数）
+  var quota = function (label, have, need) {
+    var ok = have >= need;
+    return '<div class="quota"><div class="qhead"><span>' + label + ' <b>' + have + '</b> / 最低 ' + need + '試合</span>' + (ok ? '<span class="badge ok">達成</span>' : '<span class="badge">あと' + (need - have) + '試合</span>') + '</div>' +
+      '<div class="bar' + (ok ? ' done' : '') + '"><i style="width:' + (need > 0 ? Math.min(100, have / need * 100) : 100) + '%"></i></div></div>';
+  };
+  if (p.fixed && p.virtual_total) {
+    var vt0 = p.virtual_total;
+    h += '<div class="card"><div class="qtitle"><b>参考合計の最低条件</b> ' + (vt0.eligible ? '<span class="badge ok">達成</span>' : '<span class="badge">未達成</span>') + '</div>' +
+      quota('試合数', vt0.matches, vt0.min) + '<p class="muted" style="margin:6px 0 0">届くまでは参考合計は暫定です。公式のレート・順位には関係しません。</p></div>';
+  }
   if (!p.fixed) {
     var allOk = st.matches >= minM && st.team_matches >= minT;
-    var quota = function (label, have, need) {
-      var ok = have >= need;
-      return '<div class="quota"><div class="qhead"><span>' + label + ' <b>' + have + '</b> / 最低 ' + need + '試合</span>' + (ok ? '<span class="badge ok">達成</span>' : '<span class="badge">あと' + (need - have) + '試合</span>') + '</div>' +
-        '<div class="bar' + (ok ? ' done' : '') + '"><i style="width:' + Math.min(100, have / need * 100) + '%"></i></div></div>';
-    };
     h += '<div class="card"><div class="qtitle"><b>予選通過の最低条件</b> ' + (allOk ? '<span class="badge ok">達成</span>' : '<span class="badge">未達成</span>') + '</div>' +
       quota('試合数', st.matches, minM) + quota('うちチーム戦', st.team_matches, minT) + '</div>';
   }
@@ -1294,7 +1325,7 @@ function viewMe() {
       return h2;
     };
     secBonus = sec('bonus', '追加ボーナス',
-      '<p class="muted">ランキングの合計に入っています。ボーナスは減ることはありません。到達した区分のポイントだけがもらえます。</p>' +
+      '<p class="muted">' + (p.fixed ? '参考合計（参考レート＋ボーナス）に入っています。公式のレート・順位には入りません。' : 'ランキングの合計に入っています。') + 'ボーナスは減ることはありません。到達した区分のポイントだけがもらえます。</p>' +
       line('勝利数', eb.wins, '勝', eb.wins_pt, nx({ need: eb.wins_next.need, pt: eb.wins_next.pt }, '勝')) +
       line('チーム戦で組んだ人数', eb.partners, '人', eb.partners_pt, nx(eb.partners_next, '人'), 'partners', eb.partner_list, eb.partner_not, 'まだ組んでいない人') +
       line('個人戦で戦った相手', eb.opponents, '人', eb.opponents_pt, nx(eb.opponents_next, '人'), 'opponents', eb.opponent_list, eb.opponent_not, 'まだ戦っていない人') +
@@ -1312,13 +1343,21 @@ function viewMe() {
     var sets = m.leg_scores && m.leg_scores.length ? m.leg_scores.map(function (x) { return x[my - 1] + '-' + x[2 - my]; }).join(' / ') : (my === 1 ? m.legs1 + '-' + m.legs2 : m.legs2 + '-' + m.legs1);
     return '<div class="rrow' + (won ? '' : ' lost') + '"><span class="rdate muted">' + fmt(m.started_at) + '</span><span class="rres ' + (won ? 'up' : 'down') + '">' + (won ? '○勝' : '●負') + '</span>' +
       '<span class="rvs">vs ' + names(opps) + (mates.length ? '<small class="muted">（味方: ' + names(mates) + '）</small>' : '') + '</span>' +
-      '<span class="rsets">' + sets + (m.scoring === 'throws' ? ' <a href="#" class="sclink" data-sct="' + esc(m.id) + '">スコア表 ›</a>' : '') + '</span><span class="rdelta">' + sgn(my === 1 ? m.delta1 : m.delta2) + (after[m.id] !== undefined ? '<small class="muted">→ ' + after[m.id] + '</small>' : '') + '</span></div>';
+      '<span class="rsets">' + sets + (m.scoring === 'throws' ? ' <a href="#" class="sclink" data-sct="' + esc(m.id) + '">スコア表 ›</a>' : '') + '</span><span class="rdelta">' + recentDelta(p, m, my, after) + '</span></div>';
   }).join('') + '</div>' + (ms.length > 10 ? '<button class="btn ghost small" id="meAll" style="margin-top:8px">' + (meAllMatches ? '直近10件だけにする' : 'すべての試合を見る') + '</button>' : '');
 
   var secRecent = sec('recent', '直近の試合' + (ms.length ? ' <span class="muted" style="font-weight:400;font-size:13px">（' + ms.length + '試合）</span>' : ''), recentBody);
   // 並び: 最低条件 → 追加ボーナス → 投擲成績 → 個人戦の成績 → レート推移 → 1vs1の対戦回数 → 直近の試合
   h += secBonus + secThrows + secSingles + secChart + secCount + secRecent;
   return h;
+}
+// 直近の試合の増減。レート固定の人は参考レートの増減（参考レートが非表示なら「固定」）
+function recentDelta(p, m, my, after) {
+  if (p.fixed) {
+    var v = vRateAt(p.id, m.id);
+    return v ? '<small class="muted">参考</small>' + sgn(v.delta) + '<small class="muted">→ ' + v.rating + '</small>' : '<small class="muted">固定</small>';
+  }
+  return sgn(my === 1 ? m.delta1 : m.delta2) + (after[m.id] !== undefined ? '<small class="muted">→ ' + after[m.id] + '</small>' : '');
 }
 function secOpen(key) { return store('kamo_sec_' + key) === '1'; }
 
@@ -1330,13 +1369,16 @@ function viewAdmin() {
   }
   h += '<div class="row"><button class="btn" id="adminRecalc">レート再計算</button><span class="muted">シートを直接直したあとに押してください</span></div></div>';
   var vOn = S.settings.virtual_rating_visible !== false, sOn = S.settings.sched_visible !== false, aOn = S.settings.sched_auto_join !== false;
-  h += '<div class="card"><h2>表示の設定</h2><div class="row"><span><b>レート固定の人の参考レート</b><br><span class="muted">ほかの人と同じように変動した場合のレート（個人ページ・ランキングのレイドバトル欄）</span></span>' +
+  h += '<div class="card"><h2>表示の設定</h2><div class="row"><span><b>レート固定の人の参考レート</b><br><span class="muted">ほかの人と同じように変動した場合のレートと、それにボーナスを足した参考合計（個人ページ・ランキングのレイドバトル欄・対戦履歴）</span></span>' +
     '</div><div class="row" style="margin-top:6px">' + (vOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
     '<button class="btn small' + (vOn ? ' ghost' : '') + '" id="virtualToggle" data-on="' + (vOn ? 1 : 0) + '">' + (vOn ? '非表示にする' : '表示する') + '</button></div>' +
     '<div class="row" style="margin-top:12px"><span><b>参考レートの開始値</b><br><span class="muted">空欄なら固定レート（' + fixedRates() + '）から始めます</span></span></div>' +
     '<div class="row" style="margin-top:6px"><input type="number" id="virtualStart" inputmode="numeric" placeholder="固定" value="' + (S.settings.virtual_initial_rating === null || S.settings.virtual_initial_rating === undefined ? '' : esc(S.settings.virtual_initial_rating)) + '">' +
     '<button class="btn small" id="virtualStartSave">保存</button></div>' +
-    '<p class="muted" style="margin:6px 0 0">settings シートの virtual_rating_visible・virtual_initial_rating と同じ設定です</p>' +
+    '<div class="row" style="margin-top:12px"><span><b>参考合計の最低試合数</b><br><span class="muted">参考合計（参考レート＋ボーナス）を「達成」にする試合数。空欄なら予選と同じ（' + n(S.settings.min_matches, 20) + '試合）です</span></span></div>' +
+    '<div class="row" style="margin-top:6px"><input type="number" id="virtualMin" inputmode="numeric" placeholder="' + n(S.settings.min_matches, 20) + '" value="' + esc(S.settings.virtual_min_matches_raw === undefined || S.settings.virtual_min_matches_raw === null ? '' : S.settings.virtual_min_matches_raw) + '">' +
+    '<button class="btn small" id="virtualMinSave">保存</button></div>' +
+    '<p class="muted" style="margin:6px 0 0">settings シートの virtual_rating_visible・virtual_initial_rating・virtual_min_matches と同じ設定です</p>' +
     '<div class="row" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><span><b>日程タブ</b><br><span class="muted">いつ対戦できるかを登録する時間割（非表示のあいだは参加の登録もできません。登録済みの内容は残ります）</span></span></div>' +
     '<div class="row" style="margin-top:6px">' + (sOn ? '<span class="badge ok">表示中</span>' : '<span class="badge">非表示</span>') +
     '<button class="btn small' + (sOn ? ' ghost' : '') + '" id="schedToggle" data-on="' + (sOn ? 1 : 0) + '">' + (sOn ? '非表示にする' : '表示する') + '</button></div>' +
@@ -1859,7 +1901,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#schedAutoToggle,#virtualStartSave,[data-cancelno],.cancelov,[data-take],[data-takeno],#watchBack,[data-watch],#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#schedAutoToggle,#virtualStartSave,#virtualMinSave,[data-cancelno],.cancelov,[data-take],[data-takeno],#watchBack,[data-watch],#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
@@ -1927,6 +1969,7 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (t.id === 'schedToggle') { var so = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'sched_visible', value: so }, so ? '日程タブを表示します' : '日程タブを非表示にしました'); return; }
   if (t.id === 'virtualToggle') { var on = t.dataset.on !== '1'; act('adminSetting', { admin_key: adminKey, key: 'virtual_rating_visible', value: on }, on ? '参考レートを表示します' : '参考レートを非表示にしました'); return; }
   if (t.id === 'virtualStartSave') { var vs = document.getElementById('virtualStart').value.trim(); act('adminSetting', { admin_key: adminKey, key: 'virtual_initial_rating', value: vs }, vs === '' ? '参考レートを固定レートから始めます' : '参考レートを ' + vs + ' から始めます'); return; }
+  if (t.id === 'virtualMinSave') { var vm = document.getElementById('virtualMin').value.trim(); act('adminSetting', { admin_key: adminKey, key: 'virtual_min_matches', value: vm }, vm === '' ? '参考合計の最低試合数を予選と同じにしました' : '参考合計の最低試合数を ' + vm + '試合にしました'); return; }
   if (t.id === 'adminRecalc') { act('adminRecalc', { admin_key: adminKey }, '再計算しました'); return; }
   if (d.void) { if (t.dataset.sure) act('adminVoid', { admin_key: adminKey, match_id: d.void, note: '運営が無効化' }, '無効にしました'); else { t.dataset.sure = 1; t.textContent = 'もう一度押すと無効'; } return; }
   if (d.restore) { act('adminRestore', { admin_key: adminKey, match_id: d.restore }, '元に戻しました'); return; }

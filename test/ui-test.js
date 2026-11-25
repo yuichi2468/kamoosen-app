@@ -242,7 +242,6 @@ const server = http.createServer((req, res) => {
   await page.click('details[data-sec=bonus] summary');
   await page.click('details[data-sec=singles] summary');
   await page.waitForSelector('.ebrow');
-  await page.click('details[data-sec=recent] summary');
   const order = await page.$$eval('details.sec', d => d.map(x => x.dataset.sec).join(','));
   if (order !== 'bonus,throws,singles,chart,singles_count,recent') throw new Error('並びが違う: ' + order);
   await page.click('[data-eblist=opponents]');
@@ -261,7 +260,13 @@ const server = http.createServer((req, res) => {
   if (!aSecs.includes('singles')) throw new Error('A に個人戦の成績が無い');
   const aHero = await page.$eval('.hero', x => x.textContent);
   console.log('A hero:', aHero.replace(/\s+/g, ' '));
-  if (!aHero.includes('1800') || !aHero.includes('変動した場合（参考）')) throw new Error('A の参考レートが無い: ' + aHero);
+  if (!aHero.includes('1800') || !aHero.includes('参考合計') || !aHero.includes('参考レート') || !aHero.includes('暫定・あと')) throw new Error('A の参考合計が無い: ' + aHero);
+  if (!aSecs.includes('bonus')) throw new Error('A に追加ボーナスの欄が無い');
+  const aQuota = await page.$$eval('.card', cs => cs.map(c => c.textContent).filter(t => t.includes('参考合計の最低条件')).join(''));
+  if (!aQuota.includes('最低 20試合')) throw new Error('A の最低試合数の欄: ' + aQuota);
+  const aRecent = await page.$eval('details[data-sec=recent] .rdelta', x => x.textContent);
+  console.log('A recent delta:', aRecent);
+  if (!aRecent.includes('参考')) throw new Error('A の直近の試合に参考の増減が無い: ' + aRecent);
   if (!aSecs.includes('chart')) throw new Error('A に参考のレート推移が無い');
   const aChart = await page.$eval('details[data-sec=chart] summary', x => x.textContent);
   if (!aChart.includes('参考')) throw new Error('A のレート推移に参考の表示が無い: ' + aChart);
@@ -295,6 +300,20 @@ const server = http.createServer((req, res) => {
   await page.fill('#virtualStart', '');
   await page.click('#virtualStartSave');
   await page.waitForFunction(() => S.settings.virtual_initial_rating === null);
+  // 参考合計の最低試合数: 1 にすると「達成」、空欄で予選と同じ（20）に戻る
+  await page.fill('#virtualMin', '1');
+  await page.click('#virtualMinSave');
+  await page.waitForFunction(() => S.settings.virtual_min_matches === 1);
+  await page.screenshot({ path: path.join(out, '6d_admin_virtual_min.png'), fullPage: true });
+  await page.click('nav button[data-tab=me]');
+  await page.selectOption('#meView', 'A');
+  const aHeroMin = await page.$eval('.hero', x => x.textContent);
+  if (!aHeroMin.includes('達成')) throw new Error('最低試合数 1 で達成にならない: ' + aHeroMin);
+  await page.screenshot({ path: path.join(out, '16b_me_A_eligible.png'), fullPage: true });
+  await page.click('#adminBtn');
+  await page.fill('#virtualMin', '');
+  await page.click('#virtualMinSave');
+  await page.waitForFunction(() => S.settings.virtual_min_matches === 20);
   await page.click('nav button[data-tab=me]');
   await page.selectOption('#meView', 'A');
   await page.click('nav button[data-tab=rank]');
@@ -303,13 +322,18 @@ const server = http.createServer((req, res) => {
   const rk = await page.$$eval('table.rktable tbody tr', rows => rows.map(r => [...r.children].map(c => c.innerText.replace(/\s+/g, ' ').trim())));
   console.log('ranking rows:', JSON.stringify(rk.slice(0, 4)));
   const raid = await page.$$eval('.card', cs => cs.map(c => c.textContent).filter(t => t.includes('レイドバトル')).join(''));
-  if (!raid.includes('変動した場合のレート（参考）')) throw new Error('レイドバトルに参考レートが無い: ' + raid);
+  if (!raid.includes('変動した場合のレート（参考）') || !raid.includes('参考合計')) throw new Error('レイドバトルに参考レート・参考合計が無い: ' + raid);
   for (let i = 1; i < rk.length; i++) if (Number(rk[i][4]) > Number(rk[i - 1][4])) throw new Error('合計順でない');
   if (!rk.some(r => r[3] === '+30')) throw new Error('ボーナス+30が無い'); if (rk.some(r => r.join().includes('見込み'))) throw new Error('見込みが残っている');
   await page.screenshot({ path: path.join(out, '17_rank_proj.png'), fullPage: true });
   await page.click('nav button[data-tab=log]');
   await page.setViewportSize({ width: 375, height: 667 }); await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(3500); await page.screenshot({ path: path.join(out, '5c_log_sets_375.png') }); await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.$('.hmsetsc'))) throw new Error('セット得点が中央に無い');
+  const vba = await page.$$eval('.hm .vba', x => x.map(y => y.textContent));
+  console.log('history virtual:', vba.join(' / '));
+  if (!vba.length || !/^参考 \d+ → \d+（[+-]\d+）$/.test(vba[0])) throw new Error('対戦履歴に参考レートの変動が無い: ' + vba);
+  const vbaCard = await page.evaluate(() => { const e = document.querySelector('.hm .vba'); e.scrollIntoView({ block: 'center' }); return true; });
+  await page.screenshot({ path: path.join(out, '5d_log_virtual.png') });
   await page.click('[data-sct]');
   await page.waitForSelector('.sctitle');
   const htitles = await page.$$eval('.sctitle', x => x.map(y => y.textContent));
@@ -322,10 +346,12 @@ const server = http.createServer((req, res) => {
   await page.selectOption('#meView', 'P08');
   const sl = await page.$('details[data-sec=recent] .sclink');
   if (!sl) throw new Error('直近の試合にスコア表リンクが無い');
-  await sl.scrollIntoViewIfNeeded();
+  // 直近の試合の欄を開き、30秒ごとの自動更新で描き直されても押せるように、要素ではなくセレクタで押す
+  if (!(await page.$('details[data-sec=recent][open]'))) await page.click('details[data-sec=recent] summary');
+  await page.locator('details[data-sec=recent] .sclink').first().scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, -80));
   const y0 = await page.evaluate(() => window.scrollY);
-  await sl.click();
+  await page.evaluate(() => document.querySelector('details[data-sec=recent] .sclink').click());
   await page.waitForSelector('.sctitle');
   await page.screenshot({ path: path.join(out, '19_me_score.png'), fullPage: true });
   await page.click('[data-scback]');

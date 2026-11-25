@@ -222,6 +222,20 @@ t('参考レートの表示は運営画面から切り替えられる（settings
   eq([r.data.settings.virtual_initial_rating, r.data.players.find(p => p.id === 'A').virtual_rating, r.data.players.find(p => p.id === 'A').rating], [1500, 1480, 1800]);
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_initial_rating', value: '' }); eq(r.ok, true, r.error);
   eq([r.data.settings.virtual_initial_rating, r.data.players.find(p => p.id === 'A').virtual_rating], [null, 1765]);
+  // 参考合計: 参考レート＋ボーナス、最低試合数（空欄なら min_matches=20）
+  a = r.data.players.find(p => p.id === 'A');
+  eq([a.virtual_total.total, a.virtual_total.bonus, a.virtual_total.matches, a.virtual_total.min, a.virtual_total.eligible, r.data.settings.virtual_min_matches],
+     [1765 + r.data.extra_bonus.A.total, r.data.extra_bonus.A.total, 1, 20, false, 20]);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_min_matches', value: '1.5' }); eq(r.ok, false);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_min_matches', value: '1' }); eq(r.ok, true, r.error);
+  a = r.data.players.find(p => p.id === 'A');
+  eq([a.virtual_total.min, a.virtual_total.eligible, r.data.settings.virtual_min_matches, r.data.settings.virtual_min_matches_raw], [1, true, 1, 1]);
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_min_matches', value: '' }); eq(r.ok, true, r.error);
+  eq(r.data.players.find(p => p.id === 'A').virtual_total.min, 20);
+  // 参考レートを隠すと、参考合計と鴨王のボーナスも出さない
+  r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: false }); eq(r.ok, true, r.error);
+  a = r.data.players.find(p => p.id === 'A');
+  eq([a.virtual_total === undefined, r.data.extra_bonus.A === undefined, r.data.extra_bonus.p1 !== undefined], [true, true, true]);
 });
 t('締切前に開始した試合は 21:00 以降も結果入力できる', () => {
   const g = loadGas({ now: Date.parse('2026-12-07T20:59:00+09:00') });
@@ -390,7 +404,23 @@ console.log('■ 社交王・開拓王・追加ボーナス・個人戦の成績
     // p1: 勝ち4（m1,m2,m4,m5）→ 2区切り ×10 = 20。組んだ p2,p3 = 2人 → 15。戦った p2,p3,A = 3人 → 35
     eq([ex.p1.wins, ex.p1.wins_pt, ex.p1.partners, ex.p1.partners_pt, ex.p1.opponents, ex.p1.opponents_pt, ex.p1.total], [4, 20, 2, 15, 3, 35, 70]);
     eq(ex.p1.applied, false);
-    assert.strictEqual(ex.A, undefined);
+    eq(ex.p1.fixed, false);
+  });
+  t('鴨王（レート固定）にも同じ計算で追加ボーナスが付く（順位表には入らない）', () => {
+    // A: m2（p2 と組んで負け）、m6（p1 に勝ち）→ 勝ち1 → 0pt。組んだ p2 = 1人 → 5。戦った p1 = 1人 → 0
+    eq([ex.A.fixed, ex.A.wins, ex.A.wins_pt, ex.A.partners, ex.A.partners_pt, ex.A.opponents, ex.A.opponents_pt, ex.A.total], [true, 1, 0, 1, 5, 1, 0, 5]);
+    const rk = G.buildRanking(pl, res, G.mergeBonus_({}, ex), c);
+    assert(!rk.some(r => r.player_id === 'A'));
+  });
+  t('鴨王の参考合計 = 参考レート + ボーナス（手動も含む）。最低試合数は空欄なら min_matches', () => {
+    const bm = G.mergeBonus_({ A: 7 }, ex);
+    let vt = G.computeVirtualTotals(res, bm, Object.assign({}, c, { min_matches: 3 })).A;
+    eq([vt.virtual_rating, vt.bonus, vt.total, vt.matches, vt.min, vt.eligible], [res.virtual.A, 12, res.virtual.A + 12, 2, 3, false]);
+    vt = G.computeVirtualTotals(res, bm, Object.assign({}, c, { min_matches: 3, virtual_min_matches: 2 })).A;
+    eq([vt.min, vt.eligible], [2, true]);
+    vt = G.computeVirtualTotals(res, bm, Object.assign({}, c, { virtual_min_matches: '' })).A;
+    eq(vt.min, 1);
+    eq(Object.keys(G.computeVirtualTotals(res, bm, c)), ['A']);
   });
   t('追加ボーナス: 全員と組んだ／戦ったら all の区分', () => {
     const ms2 = ['p2', 'p3', 'p4', 'p5', 'A'].map(o => M('p1', o, 1));

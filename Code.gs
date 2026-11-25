@@ -66,6 +66,7 @@ var DEFAULT_SETTINGS = [
   ['awards_visible', true, '特別賞をアプリに表示するか（FALSE で非表示。awards シートには常に出る）'],
   ['virtual_rating_visible', true, 'レート固定の人の「変動した場合」の参考レートをアプリに表示するか（FALSE で非表示。運営画面からも切り替えられる）'],
   ['virtual_initial_rating', '', '参考レートの開始値（空欄ならその人の固定レートから。運営画面からも変えられる）'],
+  ['virtual_min_matches', '', 'レート固定の人の参考合計（参考レート＋ボーナス）の最低試合数（空欄なら min_matches と同じ。運営画面からも変えられる）'],
   ['memorial_step', 100, 'メモリアル賞の区切り（100 なら 100戦目・200戦目…）'],
   ['bonus_wins_step', 10, '追加ボーナス: 勝利数の区切り（10 なら 10勝・20勝…）'],
   ['bonus_wins_pt', 10, '追加ボーナス: 勝利数の1区切りあたりのポイント（20勝なら 2×10＝+20）'],
@@ -366,7 +367,8 @@ function tierPoint_(count, allReached, tiers, allCount) {
   return { pt: pt, next: next };
 }
 
-/** 追加ボーナス（設計書 第11章）。結果入力の締切を過ぎたら applied=true（ランキングの合計に加える） */
+/** 追加ボーナス（設計書 第11章）。結果入力の締切を過ぎたら applied=true（ランキングの合計に加える）
+ *  レート固定の人（鴨王）も同じ計算で出す（fixed=true）。公式の順位には入れず、参考合計（computeVirtualTotals）にだけ使う */
 function computeExtraBonus(players, matches, res, cfg, now) {
   cfg = cfg || {};
   var step = Math.max(1, num_(cfg.bonus_wins_step, 10)), stepPt = num_(cfg.bonus_wins_pt, 10);
@@ -380,7 +382,7 @@ function computeExtraBonus(players, matches, res, cfg, now) {
   var out = {};
   players.forEach(function (p) {
     var id = String(p.player_id);
-    if (res.fixed[id] !== undefined || p.active === false) return;
+    if (p.active === false) return;
     var others = active.filter(function (x) { return x !== id; });
     var pa = meet.partners[id] || {}, op = meet.opponents[id] || {};
     var pc = Object.keys(pa).length, oc = Object.keys(op).length;
@@ -397,8 +399,31 @@ function computeExtraBonus(players, matches, res, cfg, now) {
       partner_list: pa, opponent_list: op,
       partner_not: others.filter(function (x) { return !pa[x]; }), opponent_not: others.filter(function (x) { return !op[x]; }),
       rookie: isRookie_(p), rookie_pt: rp,
-      everyone: others.length, total: wp + pt.pt + ot.pt + rp, applied: applied
+      everyone: others.length, total: wp + pt.pt + ot.pt + rp, applied: applied,
+      fixed: res.fixed[id] !== undefined
     };
+  });
+  return out;
+}
+
+/** 参考合計の最低試合数（空欄なら予選の最低試合数 min_matches と同じ） */
+function virtualMinMatches_(cfg) {
+  var v = cfg && cfg.virtual_min_matches;
+  if (v === '' || v === null || v === undefined || isNaN(Number(v))) return num_(cfg && cfg.min_matches, 20);
+  return Number(v);
+}
+
+/**
+ * レート固定の人（鴨王）の参考合計 = 参考レート + ボーナス（手動の bonus シート + 追加ボーナス）。
+ * 公式のレート・順位表には使わない。試合数が最低試合数に届くまでは eligible=false（暫定）
+ * 戻り値: { id: { virtual_rating, bonus, total, matches, min, eligible } }
+ */
+function computeVirtualTotals(res, bonusMap, cfg) {
+  var out = {}, min = virtualMinMatches_(cfg);
+  bonusMap = bonusMap || {};
+  Object.keys(res.fixed).forEach(function (id) {
+    var v = res.virtual[id], b = bonusMap[id] || 0, n = (res.stats[id] || {}).matches || 0;
+    out[id] = { virtual_rating: v, bonus: b, total: v + b, matches: n, min: min, eligible: n >= min };
   });
   return out;
 }
@@ -998,7 +1023,15 @@ function handle_(action, p) {
         if (!ADMIN_SETTINGS.hasOwnProperty(sk)) throw new Error('この設定は変更できません: ' + sk);
         var sv;
         if (ADMIN_SETTINGS[sk] === 'bool') sv = p.value === true || String(p.value).toUpperCase() === 'TRUE';
-        else {
+        else if (ADMIN_SETTINGS[sk] === 'count') {
+          // 試合数: 空欄は「予選の最低試合数と同じ」。それ以外は 0〜500 の整数
+          var rc = String(p.value === undefined || p.value === null ? '' : p.value).trim();
+          if (rc === '') sv = '';
+          else {
+            sv = Number(rc);
+            if (!/^\d+$/.test(rc) || sv > 500) throw new Error('試合数は 0〜500 の整数で入れてください');
+          }
+        } else {
           // レート: 空欄は「固定レートから」。それ以外は 0〜5000 の整数
           var raw = String(p.value === undefined || p.value === null ? '' : p.value).trim();
           if (raw === '') sv = '';
@@ -1149,7 +1182,7 @@ function virtualVisible_(cfg) {
 }
 
 // 運営画面から変えられる設定（ここにあるものだけ書き換えを許す）
-var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating', sched_visible: 'bool', sched_auto_join: 'bool' };
+var ADMIN_SETTINGS = { virtual_rating_visible: 'bool', virtual_initial_rating: 'rating', virtual_min_matches: 'count', sched_visible: 'bool', sched_auto_join: 'bool' };
 
 // 日程タブを表示するか（未設定なら表示）
 function schedVisible_(cfg) {
@@ -1181,7 +1214,8 @@ function publicState_() {
   var cfg = readSettings_(), players = readPlayers_(), matches = readMatches_(), bonus = readBonus_();
   var res = computeRatings(players, matches, cfg);
   var extra = computeExtraBonus(players, matches, res, cfg, Date.now());
-  var ranking = buildRanking(players, res, mergeBonus_(bonus, extra), cfg);
+  var bonusMap = mergeBonus_(bonus, extra);
+  var ranking = buildRanking(players, res, bonusMap, cfg);
   var pubCfg = {};
   ['start_at', 'end_at', 'result_deadline', 'initial_rating', 'win_base', 'win_coef', 'loss_base', 'loss_coef',
    'min_gain', 'min_loss', 'max_team_size', 'max_singles_vs_same', 'min_matches', 'min_team_matches',
@@ -1193,6 +1227,11 @@ function publicState_() {
   var showVirtual = virtualVisible_(cfg);
   pubCfg.virtual_rating_visible = showVirtual;
   pubCfg.virtual_initial_rating = virtualStart_(cfg);
+  pubCfg.virtual_min_matches = virtualMinMatches_(cfg);
+  pubCfg.virtual_min_matches_raw = cfg.virtual_min_matches === undefined || cfg.virtual_min_matches === null ? '' : cfg.virtual_min_matches;
+  var vTotals = showVirtual ? computeVirtualTotals(res, bonusMap, cfg) : {};
+  var pubExtra = {}; // 参考レートを隠しているときは、レート固定の人のボーナスも出さない
+  Object.keys(extra).forEach(function (id) { if (showVirtual || !extra[id].fixed) pubExtra[id] = extra[id]; });
   pubCfg.sched_visible = schedVisible_(cfg);
   pubCfg.sched_auto_join = schedAutoOn_(cfg);
   return {
@@ -1201,6 +1240,7 @@ function publicState_() {
     players: players.map(function (p) {
       return { id: p.player_id, name: String(p.name), rating: res.ratings[p.player_id], fixed: res.fixed[p.player_id] !== undefined,
                virtual_rating: showVirtual ? res.virtual[p.player_id] : undefined, // レート固定の人だけ。変動した場合の参考値（設定で非表示にできる）
+               virtual_total: vTotals[p.player_id], // レート固定の人だけ。参考レート＋ボーナスと最低試合数の達成
                active: p.active !== false, stats: res.stats[p.player_id] };
     }),
     ranking: ranking,
@@ -1219,7 +1259,7 @@ function publicState_() {
                leg_scores: m.scoring === 'throws' && m.throwList.length ? molkkyReplay(engineMatch_(m), m.throwList).legScores : undefined };
     }).reverse(),
     throw_stats: readThrowStats_(),
-    extra_bonus: extra,
+    extra_bonus: pubExtra,
     singles_stats: computeSinglesStats(matches),
     profiles: computeProfiles(players, matches),
     awards: awardsVisible_(cfg) ? computeAwards(players, matches, res, ranking, cfg) : null,
