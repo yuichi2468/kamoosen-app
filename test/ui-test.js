@@ -78,8 +78,11 @@ const server = http.createServer((req, res) => {
   await page.screenshot({ path: path.join(out, '2_start.png'), fullPage: true });
   await page.click('[data-opt=scoring][data-v=manual]');
   await page.click('#startBtn');
+  await page.waitForSelector('[data-watch]');
+  if (await page.$('[data-result],[data-cancel]')) throw new Error('試合を選ぶ前から操作ボタンが出ている');
+  await page.click('[data-watch]');
   await page.waitForSelector('[data-result]');
-  const card = page.locator('.match').first();
+  const card = page.locator('.match.ops').first();
   await card.locator('[data-f=legs1]').selectOption('2');
   await card.locator('[data-f=legs2]').selectOption('1');
   await card.locator('[data-f=score1]').fill('100');
@@ -339,7 +342,27 @@ const server = http.createServer((req, res) => {
     const cmid = r.data.matches.find(m => m.status === 'playing' && m.team1[0] === 'P10').id;
     await page.reload(); await page.waitForSelector('table');
     await page.click('nav button[data-tab=play]');
-    await page.click('[data-score="' + cmid + '"]');
+    // 一覧には引き継ぎ・取り消しのボタンを出さない（設計書 第21章）
+    if (await page.$('[data-take],[data-cancel],[data-score="' + cmid + '"]')) throw new Error('一覧に操作ボタンが出ている');
+    // 観戦: タップするとスコア表が出て、記録中の端末の送信が自動で反映される。観戦しても記録者・rev は変わらない
+    await page.screenshot({ path: path.join(out, '21b_playing_list.png') });
+    await page.click('[data-watch="' + cmid + '"]');
+    await page.waitForSelector('#watchBack');
+    await page.waitForFunction(() => /観戦中/.test(document.body.textContent));
+    const Nn = p => ({ kind: 'normal', points: p });
+    let rr = g.api('sync', { match_id: cmid, throws: [Nn(7), Nn(3), Nn(9)], leg_orders: [], base_rev: 0, device: 'other' }); if (!rr.ok) throw new Error(rr.error);
+    await page.waitForFunction(() => document.querySelectorAll('.sctwrap.live td.tot').length >= 3, null, { timeout: 12000 });
+    const wb = (await page.textContent('.board')).replace(/\s+/g, ' ');
+    if (!/16/.test(wb) || !/3/.test(wb)) throw new Error('観戦の得点が更新されない: ' + wb);
+    await page.screenshot({ path: path.join(out, '22_watch.png'), fullPage: true });
+    { const wm = g.api('state').data.matches.find(m => m.id === cmid); if (wm.rev !== 1 || wm.scorer !== '端末other') throw new Error('観戦で記録に影響した: ' + wm.rev + ' ' + wm.scorer); }
+    // 引き継ぎは2回押す
+    await page.click('[data-take]');
+    await page.waitForSelector('[data-takeno]');
+    await page.screenshot({ path: path.join(out, '23_watch_take.png'), fullPage: true });
+    await page.click('[data-takeno]');
+    if (await page.$('[data-takeno]')) throw new Error('引き継ぎの確認が閉じない');
+    await page.click('[data-take]'); await page.click('[data-take]');
     await page.waitForSelector('.points');
     await page.click('[data-pt="5"]'); await page.click('#okThrow');
     if ((await page.textContent('#okThrow')).trim() !== '確定（ミス）') throw new Error('点数未選択の確定の表示がおかしい');

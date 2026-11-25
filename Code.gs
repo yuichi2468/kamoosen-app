@@ -967,6 +967,14 @@ function handle_(action, p) {
     if (!mt) throw new Error('試合が見つかりません');
     return { throws: mt.scoring === 'throws' ? mt.throwList : [], leg_orders: mt.legOrders };
   }
+  if (action === 'watch') { // 試合タブの観戦（読み取りのみ。ロックも書き込みもしないので、記録中の端末に影響しない。設計書 第21章）
+    var wm = readMatches_().filter(function (x) { return x.match_id === String(p.match_id || ''); })[0];
+    if (!wm) throw new Error('試合が見つかりません');
+    return { now: Date.now(), match: { id: wm.match_id, status: wm.status, scoring: wm.scoring, rev: wm.rev, scorer: wm.scorer,
+      team1: parseIds_(wm.team1_ids), team2: parseIds_(wm.team2_ids), first_team: wm.first_team, use_order: wm.use_order,
+      leg3_first: wm.leg3_first, legs1: wm.team1_legs, legs2: wm.team2_legs, winner: wm.winner === '' ? null : Number(wm.winner),
+      started_at: toTime_(wm.started_at), throws: wm.scoring === 'throws' ? wm.throwList : [], leg_orders: wm.legOrders } };
+  }
   if (action === 'schedule') return scheduleState_(); // 日程タブ（読み取りのみ。日程調整 設計書）
   if (action === 'schedSet' || action === 'schedLeave') {
     var slock = LockService.getScriptLock();

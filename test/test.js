@@ -462,6 +462,12 @@ t('開始 → 投擲の送信 → 2本目の順番 → 自動で結果登録・�
   r = g.api('sync', { match_id: mid, throws: leg1, leg_orders: [], base_rev: 1, device: 'dev1' }); eq(r.ok, true, r.error);
   { const mt = g.api('matchThrows', { match_id: mid }); eq([mt.ok, JSON.stringify(mt.data.throws) === JSON.stringify(leg1)], [true, true]); // 履歴のスコア表用（読み取り）
     eq(g.api('matchThrows', { match_id: 'nope' }).ok, false); }
+  { // 観戦（読み取りのみ）: 記録中の端末の rev・記録者を変えない（設計書 第21章）
+    const before = JSON.stringify(sh.matches.data);
+    const w = g.api('watch', { match_id: mid, device: 'dev2' });
+    eq([w.ok, w.data.match.status, w.data.match.rev, w.data.match.scorer, w.data.match.throws.length], [true, 'playing', 2, '端末dev1', leg1.length]);
+    eq(JSON.stringify(sh.matches.data), before);
+    eq(g.api('watch', { match_id: 'nope' }).ok, false); }
   // 2本目の順番を決めずに投げるとエラー
   r = g.api('sync', { match_id: mid, throws: leg1.concat([N(1)]), leg_orders: [], base_rev: 2, device: 'dev1' }); eq(r.ok, false);
   // メンバーと合わない順番はエラー
