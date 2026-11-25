@@ -52,6 +52,14 @@ const server = http.createServer((req, res) => {
   await page.goto(url);
   await page.waitForSelector('table');
   await page.screenshot({ path: path.join(out, '1_ranking.png'), fullPage: true });
+  {
+    // 最低試合数を満たした人がいなくても、上位8位の下に区切り線を引く
+    const cut = await page.$$eval('.rktable tbody tr', r => r.map((x, i) => x.classList.contains('cut') ? i : -1).filter(i => i >= 0));
+    const ranks = await page.$$eval('.rktable tbody tr td:first-child', x => x.map(y => +y.textContent));
+    const want = ranks.filter(r => r <= 8).length - 1;
+    console.log('ranking cut after row', cut.join(','), 'ranks', ranks.join(','));
+    if (cut.length !== 1 || cut[0] !== want) throw new Error('8位の下に区切り線が無い: ' + cut);
+  }
 
   await page.click('nav button[data-tab=play]');
   // チームの枠をタップ → 選手を選ぶ → 確定（設計書 19.2）
@@ -170,7 +178,7 @@ const server = http.createServer((req, res) => {
   {
     const rows = await page.$$eval('.sctwrap.live .sct tbody tr', r => r.map(x => [...x.children].map(c => c.className + ':' + c.innerText.replace(/\s+/g, ' ').trim())));
     console.log('live score table:', JSON.stringify(rows));
-    if (rows.length !== 3 || !rows[2][4].startsWith('tot c-m1')) throw new Error('試合中のスコア表がおかしい: ' + JSON.stringify(rows));
+    if (rows.length !== 3 || rows[1][2] !== 'pt:12' || rows[2][1] !== 'pt:3' || rows[2][4] !== 'pt tsep:—' || !rows[2][5].startsWith('tot c-m1')) throw new Error('試合中のスコア表がおかしい: ' + JSON.stringify(rows));
   }
   await page.setViewportSize({ width: 375, height: 667 });
   await page.evaluate(() => window.scrollTo(0, 0));
