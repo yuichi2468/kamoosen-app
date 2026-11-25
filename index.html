@@ -199,6 +199,13 @@ input[type=number] { width: 80px; }
 .match .side { font-size: 14px; }
 .match .side.t1 { color: var(--t1); } .match .side.t2 { color: var(--t2); text-align: right; }
 .match .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.match.tap { cursor: pointer; }
+.match.tap:active { background: var(--line); }
+.tapfoot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+.tapgo { font-size: 14px; font-weight: 600; color: var(--t1); }
+.match.ops { margin-top: 16px; border-style: dashed; }
+.match.ops h3 { margin: 0 0 4px; font-size: 15px; }
+.match.ops p { font-size: 12px; margin: 0 0 8px; }
 .res { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .res label { font-size: 12px; color: var(--muted); display: block; }
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); z-index: 20; display: none; }
@@ -398,6 +405,8 @@ var startStep = 1; // 試合開始: 1=メンバーを選ぶ、2=投擲順と先�
 var scoringId = null;      // スコア入力中の試合
 var LC = {};               // 端末内の記録 { mid: { throws, leg3_first, leg_orders, base_rev, ver, sentVer, takeover, conflict, confirmEnd, draft } }
 var manualOpen = {};
+var watchId = null, watchData = null, watchAt = 0, watchErr = false, watchTimer = null, takeArm = null; // 観戦中の試合（設計書 第21章）
+var WATCH_MS = 5000; // 観戦の更新間隔
 var syncing = false, syncTimer = null;
 
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
@@ -569,8 +578,9 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'sched') b.hidden = !schOnTab; });
   document.getElementById('adminBtn').classList.toggle('on', tab === 'admin');
   var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched })[tab]();
+  var osw = document.querySelector('.sctwrap.live'), keepY = watchId && osw && osw.scrollTop + osw.clientHeight < osw.scrollHeight - 4 ? osw.scrollTop : null; // 観戦中に上の方を見ていたら、更新しても動かさない
   document.getElementById('main').innerHTML = html;
-  var sw = document.querySelector('.sctwrap.live'); if (sw) sw.scrollTop = sw.scrollHeight; // 最新のターンが見えるように
+  var sw = document.querySelector('.sctwrap.live'); if (sw) sw.scrollTop = keepY !== null ? keepY : sw.scrollHeight; // 最新のターンが見えるように
   document.body.classList.toggle('scoring', !!scoringId && tab === 'play'); // スコア入力中は見出しを隠して1画面に収める
   showSendNotice();
 }
@@ -672,6 +682,7 @@ function singles(a, b) { return S.singles[a < b ? a + '|' + b : b + '|' + a] || 
 
 function viewPlay() {
   if (scoringId) return viewScoring();
+  if (watchId) return viewWatch();
   var s = S.settings, max = n(s.max_team_size, 4), busy = busySet();
   var h = '';
   // 進行中の試合
@@ -788,19 +799,104 @@ function liveLine(m) {
     (st.nextTeam ? '　次: チーム' + st.nextTeam + (st.nextPlayer ? ' ' + esc(P(st.nextPlayer).name) : '') : st.needSetup ? '　' + st.leg + 'セット目の準備中' : '') + '</div>';
 }
 
+// 試合中の一覧の1試合。タップすると観戦画面（引き継ぎ・取り消しなどの操作はそこで出す。設計書 第21章）
 function matchCard(m) {
-  var h = '<div class="match" data-mid="' + esc(m.id) + '"><div class="vs"><div class="side t1">' + names(m.team1) + '</div><div class="muted">vs</div><div class="side t2">' + names(m.team2) + '</div></div>';
-  h += '<div class="meta">開始 ' + fmt(m.started_at) + (m.scoring === 'throws' ? '　1投ごとに記録' + (m.use_order ? '（投擲順あり）' : '') : '') + '</div>';
-  if (m.scoring === 'throws') {
-    h += liveLine(m);
-    var mineDev = m.scorer === '端末' + deviceId();
-    h += '<div class="row" style="margin-top:8px"><button class="btn small" data-score="' + esc(m.id) + '">' + (mineDev || !m.scorer ? 'スコア入力を開く' : 'この端末で記録を引き継ぐ') + '</button>' +
-      (manualOpen[m.id] ? '' : cancelBtn(m)) + '</div><p class="muted" style="margin:6px 0 0"><a href="#" data-manual="' + esc(m.id) + '" style="color:var(--muted);font-weight:400">予備: 結果だけ入力に切り替える</a></p>';
-    if (!mineDev && m.scorer) h += '<div class="muted" style="margin-top:4px">ほかの端末で記録中です。引き継ぐと、この端末から記録を続けられます。</div>';
-    if (manualOpen[m.id]) h += manualForm(m);
+  var thr = m.scoring === 'throws', mineDev = m.scorer === '端末' + deviceId();
+  var h = '<div class="match tap" data-watch="' + esc(m.id) + '" role="button" tabindex="0"><div class="vs"><div class="side t1">' + names(m.team1) + '</div><div class="muted">vs</div><div class="side t2">' + names(m.team2) + '</div></div>';
+  h += '<div class="meta">開始 ' + fmt(m.started_at) + (thr ? '　1投ごとに記録' + (m.use_order ? '（投擲順あり）' : '') + (mineDev ? '　<b>この端末で記録中</b>' : '') : '　結果だけ入力') + '</div>';
+  if (thr) h += liveLine(m);
+  h += '<div class="tapfoot">' + (thr && mineDev ? '<button class="btn small" data-score="' + esc(m.id) + '">スコア入力に戻る</button>' : '<span></span>') +
+    '<span class="tapgo">' + (thr ? '観戦する' : '結果を入力する') + ' ›</span></div>';
+  return h + '</div>';
+}
+
+/* ---- 観戦（設計書 第21章）: 読み取りだけ。記録中の端末には何も送らない ---- */
+function curWatch() { return watchData && watchData.id === watchId ? watchData : findM(watchId); }
+function openWatch(mid) {
+  watchId = mid; watchData = null; watchAt = 0; watchErr = false; takeArm = null; cancelArm = null; scoreSel = null;
+  render(); window.scrollTo(0, 0);
+  pollWatch();
+}
+function closeWatch() { watchId = null; watchData = null; takeArm = null; clearTimeout(watchTimer); }
+function pollWatch() {
+  clearTimeout(watchTimer);
+  var id = watchId, m0 = curWatch();
+  if (!id || !m0 || m0.scoring !== 'throws') return; // 結果だけ入力の試合は見るものがないので読み込まない
+  var next = function () { if (watchId === id) watchTimer = setTimeout(pollWatch, WATCH_MS); };
+  if (document.visibilityState !== 'visible' || syncing) { next(); return; }
+  call('watch', { match_id: id }).then(function (d) {
+    if (watchId !== id) return;
+    watchData = d.match; watchAt = Date.now(); watchErr = false;
+    if (d.match.status !== 'playing') { call('state').then(function (st) { S = st; watchRender(); }).catch(function () {}); } // 終わった・取り消された: ランキングなども読み直す（以後は更新しない）
+    else next();
+    watchRender();
+  }).catch(function () { if (watchId !== id) return; watchErr = true; watchRender(); next(); });
+}
+// 入力中（結果だけ入力の欄など）は描き直さない
+function watchRender() { if (tab === 'play' && watchId && !scoringId && !document.activeElement.matches('input,select')) render(); }
+
+function scoreBoard(st, m) {
+  return '<div class="board">' + [1, 2].map(function (t) {
+    var k = t - 1, ms = st.misses[k];
+    return '<div class="tb t' + t + (st.nextTeam === t ? ' turn' : '') + '"><div class="legs">チーム' + t + '</div><div class="stars" aria-label="取ったセット ' + st.legsWon[k] + '">' + stars(st.legsWon[k]) + '</div><div class="big">' + st.scores[k] + '</div>' +
+      '<div class="dots" aria-label="連続ミス' + ms + '回">' + [0, 1, 2].map(function (i) { return i < ms ? '<span class="x">✕</span>' : '<span>・</span>'; }).join('') + '</div>' +
+      '<div class="legs">' + names(t === 1 ? m.team1 : m.team2) + '</div></div>';
+  }).join('') + '</div>';
+}
+// 見ているセットのタブ（数字は各セットの点数）と、そのセットのスコア表
+function liveTables(st, m, mid, len) {
+  var selLeg = scoreSel && scoreSel.mid === mid && scoreSel.len === len ? scoreSel.leg : st.leg, h = '';
+  if (st.leg > 1) h += '<div class="sctabs">' + Array.apply(null, Array(st.leg)).map(function (_, i) {
+    var ls = st.legScores[i];
+    return '<button data-scleg="' + (i + 1) + '" class="' + (selLeg === i + 1 ? 'on' : '') + '">' + (i + 1) + 'セット目' + (ls ? ' ' + ls[0] + '-' + ls[1] : '') + '</button>';
+  }).join('') + '</div>';
+  return h + '<div class="sctwrap live">' + scoreTable(st, m, selLeg, true) + '</div>' + scoreLegend();
+}
+function hms(t) { var d = new Date(t), z = function (x) { return (x < 10 ? '0' : '') + x; }; return d.getHours() + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()); }
+
+function viewWatch() {
+  var m = curWatch();
+  var h = '<div class="card"><div class="row" style="justify-content:space-between;margin-bottom:8px"><button class="btn small ghost" id="watchBack">‹ 試合一覧</button>';
+  if (!m) return h + '</div><p>試合が見つかりません。</p></div>';
+  var thr = m.scoring === 'throws', live = m.status === 'playing';
+  h += '<span class="muted">' + (!live ? '' : !thr ? '' : watchErr ? '通信待ち（自動で再試行）' : watchAt ? '観戦中・' + hms(watchAt) + ' 更新' : '読み込み中…') + '</span></div>';
+  h += '<div class="match" style="border:0;padding:0;margin:0"><div class="vs"><div class="side t1">' + names(m.team1) + '</div><div class="muted">vs</div><div class="side t2">' + names(m.team2) + '</div></div>' +
+    '<div class="meta">開始 ' + fmt(m.started_at) + '</div></div>';
+  if (m.status === 'void') return h + '<div class="warnbox" style="margin-top:10px">この試合は取り消されました。</div></div>';
+  if (!thr) {
+    h += '<p class="muted">結果だけ入力の試合なので、スコア表はありません。</p>';
   } else {
-    h += manualForm(m);
+    var st = molkkyReplay(engineOf(m), m.throws || []);
+    var setupNow = st.needSetup && !st.error && !st.finished;
+    if (!setupNow) h += scoreBoard(st, m);
+    if (st.legScores.length) h += '<div class="muted" style="margin-top:6px">' + st.legScores.map(function (x, i) { return (i + 1) + 'セット目 ' + x[0] + '-' + x[1]; }).join('　') + '</div>';
+    h += '<div class="nextbar">' + (m.status === 'done' ? '試合終了　チーム' + m.winner + 'の勝ち（' + m.legs1 + '-' + m.legs2 + '）'
+      : st.finished ? 'チーム' + st.winner + 'が上がりました（' + st.legsWon[0] + '-' + st.legsWon[1] + '）<br><span class="muted">記録している端末で確定すると試合終了です</span>'
+      : setupNow ? st.leg + 'セット目の準備中（先攻・投擲順を決めています）'
+      : st.nextTeam ? '次: <b style="color:var(--t' + st.nextTeam + ')">チーム' + st.nextTeam + (st.nextPlayer ? '　' + esc(P(st.nextPlayer).name) : '') + '</b>　あと ' + (50 - st.scores[st.nextTeam - 1]) + '点' : '') + '</div>';
+    if (!st.log.length) h += '<p class="muted">まだ投げていません。投げると自動で表示されます。</p>';
+    else if (st.finished) h += scoreTablesAll(st, m);
+    else h += liveTables(st, m, m.id, (m.throws || []).length);
+    if (live) h += '<p class="muted" style="margin:6px 0 0;font-size:12px">約' + (WATCH_MS / 1000) + '秒ごとに自動で更新します。見ているだけなら、記録している端末には影響しません。</p>';
   }
+  if (live) h += watchOps(m);
+  return h + '</div>';
+}
+
+// 観戦画面の下の操作（記録する人だけが使う）
+function watchOps(m) {
+  var thr = m.scoring === 'throws', mineDev = m.scorer === '端末' + deviceId();
+  var h = '<div class="match ops"><h3>この試合の操作</h3>';
+  if (!thr) return h + '<p class="muted">結果を入力すると、この試合は終了します。</p>' + manualForm(m) + '</div>';
+  h += '<p class="muted">記録する人だけが使います。観戦するだけなら押す必要はありません。</p><div class="row">';
+  if (mineDev || !m.scorer) h += '<button class="btn small" data-score="' + esc(m.id) + '">スコア入力を開く</button>';
+  else if (takeArm === m.id) h += '</div><div class="warnbox"><b>この端末で記録を引き継ぎますか？</b><br>引き継ぐと、いま記録している端末からは送れなくなります。電池切れなどで交代するときだけ使ってください。' +
+    '<div class="row" style="margin-top:8px"><button class="btn small" data-take="' + esc(m.id) + '">もう一度押すと引き継ぐ</button><button class="btn small ghost" data-takeno="1">やめる</button></div></div><div class="row">';
+  else h += '<button class="btn small" data-take="' + esc(m.id) + '">この端末で記録を引き継ぐ</button>';
+  h += (manualOpen[m.id] ? '' : cancelBtn(m)) + '</div>';
+  if (!mineDev && m.scorer && takeArm !== m.id) h += '<div class="muted" style="margin-top:4px">ほかの端末で記録中です。</div>';
+  h += '<p class="muted" style="margin:8px 0 0"><a href="#" data-manual="' + esc(m.id) + '" style="color:var(--muted);font-weight:400">予備: 結果だけ入力に切り替える</a></p>';
+  if (manualOpen[m.id]) h += manualForm(m);
   return h + '</div>';
 }
 
@@ -826,6 +922,7 @@ function openScoring(mid) {
   loc.draft = null; loc.conflict = null; loc.selPt = null;
   loc.takeover = !!(m.scorer && m.scorer !== '端末' + deviceId());
   LC[mid] = loc; lcSave(mid);
+  closeWatch();
   scoringId = mid; tab = 'play'; render(); window.scrollTo(0, 0);
   if (loc.takeover) { loc.ver++; queueSync(true); }
 }
@@ -929,12 +1026,7 @@ function viewScoring() {
   }
   // セットの準備画面では得点ボード（0 - 0）は出さない
   var setupScreen = st.needSetup && !st.error && !st.finished;
-  if (!setupScreen) h += '<div class="board">' + [1, 2].map(function (t) {
-    var k = t - 1, ms = st.misses[k];
-    return '<div class="tb t' + t + (st.nextTeam === t ? ' turn' : '') + '"><div class="legs">チーム' + t + '</div><div class="stars" aria-label="取ったセット ' + st.legsWon[k] + '">' + stars(st.legsWon[k]) + '</div><div class="big">' + st.scores[k] + '</div>' +
-      '<div class="dots" aria-label="連続ミス' + ms + '回">' + [0, 1, 2].map(function (i) { return i < ms ? '<span class="x">✕</span>' : '<span>・</span>'; }).join('') + '</div>' +
-      '<div class="legs">' + names(t === 1 ? m.team1 : m.team2) + '</div></div>';
-  }).join('') + '</div>';
+  if (!setupScreen) h += scoreBoard(st, m);
   if (st.legScores.length) h += '<div class="muted" style="margin-top:6px">' + st.legScores.map(function (x, i) { return (i + 1) + 'セット目 ' + x[0] + '-' + x[1]; }).join('　') + '</div>';
 
   if (st.error) {
@@ -959,12 +1051,7 @@ function viewScoring() {
   if (st.log.length && st.finished) {
     h += scoreTablesAll(st, m);
   } else if (st.log.length) {
-    var selLeg = scoreSel && scoreSel.mid === mid && scoreSel.len === loc.throws.length ? scoreSel.leg : st.leg;
-    if (st.leg > 1) h += '<div class="sctabs">' + Array.apply(null, Array(st.leg)).map(function (_, i) {
-      var ls = st.legScores[i];
-      return '<button data-scleg="' + (i + 1) + '" class="' + (selLeg === i + 1 ? 'on' : '') + '">' + (i + 1) + 'セット目' + (ls ? ' ' + ls[0] + '-' + ls[1] : '') + '</button>';
-    }).join('') + '</div>';
-    h += '<div class="sctwrap live">' + scoreTable(st, m, selLeg, true) + '</div>' + scoreLegend();
+    h += liveTables(st, m, mid, loc.throws.length);
   }
   if (!loc.confirmEnd) h += '<div class="cancelrow">' + cancelBtn(m) + '<p class="muted">試合をなかったことにします（記録もレートも残りません）</p></div>';
   return h + '</div>';
@@ -1762,17 +1849,17 @@ window.addEventListener('resize', function () { if (tab === 'sched' && SCH && !s
 
 /* ---- イベント ---- */
 document.getElementById('adminBtn').addEventListener('click', function () { if (tab === 'sched') schLeave(); scoreView = null; tab = 'admin'; render(); window.scrollTo(0, 0); });
-document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; if (tab === 'sched' && b.dataset.tab !== 'sched') schLeave(); if (tab !== 'sched' && b.dataset.tab === 'sched') schEnter(); schOpen = schForm = schBulk = null; tab = b.dataset.tab; render(); } });
+document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; closeWatch(); if (tab === 'sched' && b.dataset.tab !== 'sched') schLeave(); if (tab !== 'sched' && b.dataset.tab === 'sched') schEnter(); schOpen = schForm = schBulk = null; tab = b.dataset.tab; render(); } });
 document.getElementById('main').addEventListener('toggle', function (e) { var k = e.target.dataset && e.target.dataset.sec; if (k) store('kamo_sec_' + k, e.target.open ? '1' : '0'); }, true);
 document.getElementById('main').addEventListener('input', function (e) { if (e.target.id === 'meFilter') { meFilter = e.target.value; var p0 = e.target.selectionStart; render(); var f0 = document.getElementById('meFilter'); f0.focus(); f0.setSelectionRange(p0, p0); return; } if (e.target.id === 'filter') { filter = e.target.value; var pos = e.target.selectionStart; render(); var f = document.getElementById('filter'); f.focus(); f.setSelectionRange(pos, pos); } });
 document.getElementById('main').addEventListener('change', function (e) { if (e.target.id === 'meView') { meView = e.target.value; meAllMatches = false; store('kamo_view', meView); render(); } });
 document.getElementById('main').addEventListener('click', function (e) {
   var scl = e.target.closest('[data-scleg]');
-  if (scl) { var lc = LC[scoringId]; scoreSel = { mid: scoringId, leg: Number(scl.dataset.scleg), len: lc ? lc.throws.length : 0 }; render(); return; }
+  if (scl) { var lc = scoringId && LC[scoringId], wm = !scoringId && curWatch(); scoreSel = { mid: scoringId || watchId, leg: Number(scl.dataset.scleg), len: lc ? lc.throws.length : wm ? (wm.throws || []).length : 0 }; render(); return; }
   var sct = e.target.closest('[data-sct]');
   if (sct) { e.preventDefault(); openScore(sct.dataset.sct); return; }
   if (e.target.closest('[data-scback]')) { closeScore(); return; }
-  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#schedAutoToggle,#virtualStartSave,[data-cancelno],.cancelov,#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
+  var t = e.target.closest('[data-up],[data-opt],[data-score],[data-manual],[data-pt],#okThrow,[data-dfirst],[data-dup],[data-result],[data-cancel],[data-void],[data-restore],[data-me],[data-eblist],#meAll,#noOrder,#nextStep,#backStep,[data-teampick],[data-tp],#tpOk,#tpBack,#startBtn,#clearBtn,#adminLogin,#adminRecalc,#virtualToggle,#schedToggle,#schedAutoToggle,#virtualStartSave,[data-cancelno],.cancelov,[data-take],[data-takeno],#watchBack,[data-watch],#undoThrow,#confirmEnd,#legStart,#closeScore,#forceMine,#reloadServer');
   if (!t) return;
   if (t.id !== 'noOrder') e.preventDefault();
   var d = t.dataset;
@@ -1785,6 +1872,10 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (d.opt) { startOpts[d.opt] = d.opt === 'first_team' ? Number(d.v) : d.v; render(); return; }
   if (d.up) { var arr = pick[d.team], i = arr.indexOf(d.up); if (i > 0) { arr.splice(i, 1); arr.splice(i - 1, 0, d.up); } render(); return; }
   if (d.score) { openScoring(d.score); return; }
+  if (d.watch) { openWatch(d.watch); return; }
+  if (t.id === 'watchBack') { closeWatch(); render(); window.scrollTo(0, 0); return; }
+  if (d.takeno) { takeArm = null; render(); return; }
+  if (d.take) { if (takeArm !== d.take) { takeArm = d.take; render(); return; } takeArm = null; openScoring(d.take); return; }
   if (d.manual) { manualOpen[d.manual] = !manualOpen[d.manual]; render(); return; }
   if (d.pt) { var lp = LC[scoringId], v = Number(d.pt); lp.selPt = lp.selPt === v ? null : v; render(); return; }
   if (t.id === 'okThrow') { var lo = LC[scoringId]; if (lo.selPt) addThrow('normal', lo.selPt); else addThrow('miss'); return; }
@@ -1816,7 +1907,8 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (d.result) {
     var box = t.closest('.match'), v = function (f) { return box.querySelector('[data-f=' + f + ']').value; };
     t.disabled = true; manualSending++; showSendNotice();
-    act('result', { match_id: d.result, team1_legs: v('legs1'), team2_legs: v('legs2'), team1_score: v('score1'), team2_score: v('score2') }, '結果を記録しました').then(function () { t.disabled = false; manualSending--; render(); });
+    var rid0 = d.result;
+    act('result', { match_id: rid0, team1_legs: v('legs1'), team2_legs: v('legs2'), team1_score: v('score1'), team2_score: v('score2') }, '結果を記録しました').then(function (ok) { t.disabled = false; manualSending--; if (ok && watchId === rid0) closeWatch(); render(); });
     return;
   }
   if (d.cancelno || (t.classList.contains('cancelov') && e.target === t)) { cancelArm = null; render(); return; }
@@ -1826,7 +1918,7 @@ document.getElementById('main').addEventListener('click', function (e) {
     cancelArm = null; t.disabled = true;
     if (scoringId === cid) clearTimeout(syncTimer);
     call('cancel', { match_id: cid, device: deviceId() }).then(function (data) {
-      S = data; lcDrop(cid); delete manualOpen[cid]; if (scoringId === cid) scoringId = null; render(); toast('試合を取り消しました');
+      S = data; lcDrop(cid); delete manualOpen[cid]; if (scoringId === cid) scoringId = null; if (watchId === cid) closeWatch(); render(); toast('試合を取り消しました');
     }).catch(function (e) { render(); toast(e.message || String(e), true); });
     return;
   }
