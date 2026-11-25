@@ -107,7 +107,15 @@ const server = http.createServer((req, res) => {
   const ba = await page.$$eval('.hm .ba', x => x.map(y => [...y.children].map(c => c.textContent).join(' / ')));
   console.log('history before/after:', JSON.stringify(ba.slice(0, 4)));
   if (!ba.some(x => /1800（固定）/.test(x)) || !ba.some(x => /^\d+ → \d+$/.test(x))) throw new Error('変動前後のレートが出ていない');
+  // 1日ごとの区切り: 同じ日の試合は1つの見出しの下にまとまる。日付が変わると見出しが増える
+  let days = await page.$$eval('.logday', x => x.map(y => y.textContent));
+  if (days.length !== 1 || !/^\d+\/\d+（[日月火水木金土]）\d+試合$/.test(days[0])) throw new Error('日ごとの区切り: ' + JSON.stringify(days));
+  await page.evaluate(() => { var d = S.matches.filter(m => m.status === 'done'); d[d.length - 1].started_at -= 86400000; d[d.length - 2].started_at -= 86400000; render(); });
+  days = await page.$$eval('.logday', x => x.map(y => y.textContent));
+  console.log('log days:', JSON.stringify(days));
+  if (days.length !== 2 || !/2試合$/.test(days[1])) throw new Error('日付が変わったところで区切られない: ' + JSON.stringify(days));
   await page.screenshot({ path: path.join(out, '5_log.png'), fullPage: true });
+  await page.evaluate(() => { var d = S.matches.filter(m => m.status === 'done'); d[d.length - 1].started_at += 86400000; d[d.length - 2].started_at += 86400000; render(); });
   await page.setViewportSize({ width: 375, height: 667 });
   await page.screenshot({ path: path.join(out, '5b_log_375.png') });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -126,7 +134,12 @@ const server = http.createServer((req, res) => {
   await page.evaluate(() => { S.singles['P05|P07'] = 3; render(); });
   if (!(await page.textContent('#main')).includes('上限の3試合に達しています') || !(await page.isDisabled('#nextStep'))) throw new Error('1vs1上限の警告が出ない');
   await page.evaluate(() => { delete S.singles['P05|P07']; render(); });
+  // ほかの試合中の一覧: メンバー選びの画面には出るが、投擲順・先攻を決める画面には出さない
+  await page.evaluate(() => { var m = JSON.parse(JSON.stringify(S.matches.filter(x => x.status === 'done')[0])); m.id = 'Mfake'; m.status = 'playing'; m.team1 = ['P10']; m.team2 = ['P11']; S.matches.unshift(m); render(); });
+  if (!(await page.$('.tapgo'))) throw new Error('メンバー選びの画面に試合中の一覧がない');
   await page.click('#nextStep'); // 画面2へ
+  if (await page.$('.tapgo')) throw new Error('先攻・後攻を決める画面に、ほかの試合中の一覧が出ている');
+  await page.evaluate(() => { S.matches = S.matches.filter(x => x.id !== 'Mfake'); render(); });
   if (!(await page.textContent('#main')).includes('個人戦なので')) throw new Error('個人戦の表示がない');
   if (await page.$('#noOrder')) throw new Error('個人戦に「投擲順を入れない」が出ている');
   await page.screenshot({ path: path.join(out, '7a_start_solo.png'), fullPage: true });
@@ -263,7 +276,7 @@ const server = http.createServer((req, res) => {
   if (!aHero.includes('1800') || !aHero.includes('参考合計') || !aHero.includes('参考レート') || !aHero.includes('暫定・あと')) throw new Error('A の参考合計が無い: ' + aHero);
   if (!aSecs.includes('bonus')) throw new Error('A に追加ボーナスの欄が無い');
   const aQuota = await page.$$eval('.card', cs => cs.map(c => c.textContent).filter(t => t.includes('参考合計の最低条件')).join(''));
-  if (!aQuota.includes('最低 20試合')) throw new Error('A の最低試合数の欄: ' + aQuota);
+  if (!aQuota.includes('最低 15試合')) throw new Error('A の最低試合数の欄: ' + aQuota);
   const aRecent = await page.$eval('details[data-sec=recent] .rdelta', x => x.textContent);
   console.log('A recent delta:', aRecent);
   if (!aRecent.includes('参考')) throw new Error('A の直近の試合に参考の増減が無い: ' + aRecent);
@@ -313,7 +326,7 @@ const server = http.createServer((req, res) => {
   await page.click('#adminBtn');
   await page.fill('#virtualMin', '');
   await page.click('#virtualMinSave');
-  await page.waitForFunction(() => S.settings.virtual_min_matches === 20);
+  await page.waitForFunction(() => S.settings.virtual_min_matches === 15);
   await page.click('nav button[data-tab=me]');
   await page.selectOption('#meView', 'A');
   await page.click('nav button[data-tab=rank]');

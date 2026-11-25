@@ -24,6 +24,8 @@ nav { display: flex; background: var(--card); border-bottom: 1px solid var(--lin
 nav button { flex: 1; min-width: 64px; white-space: nowrap; border: 0; background: none; padding: 12px 6px; font-size: 14px; color: var(--muted); border-bottom: 3px solid transparent; cursor: pointer; }
 nav button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
 main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+.logday { display: flex; justify-content: space-between; align-items: baseline; margin: 16px -14px 8px; padding: 6px 14px; background: rgba(120,120,140,.12); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 15px; }
+.logday:first-of-type { margin-top: 4px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
 .card h2 { font-size: 16px; margin: 0 0 10px; }
 .muted { color: var(--muted); font-size: 13px; }
@@ -547,6 +549,10 @@ function fmt(t) {
   try { return new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t)); }
   catch (e) { var d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); }
 }
+// 日本時間の日付のキー（YYYY-MM-DD）と見出し（11/25（水））。時刻がない試合は「日時なし」
+function jstParts(t) { var d = new Date(Number(t) + 9 * 3600000); return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), w: d.getUTCDay() }; }
+function dayKey(t) { if (!t || isNaN(t)) return ''; var p = jstParts(t); return p.y + '-' + p.m + '-' + p.d; }
+function dayLabel(t) { if (!t || isNaN(t)) return '日時なし'; var p = jstParts(t); return p.m + '/' + p.d + '（' + '日月火水木金土'.charAt(p.w) + '）'; }
 function sgn(v) { if (v === undefined || v === null || v === '') return ''; return (v > 0 ? '<span class="up">+' : '<span class="down">') + v + '</span>'; }
 /* 端末ごとのランダムな記号（記録者の特定はしない。運営が log で操作元を追うためだけに使う） */
 function deviceId() {
@@ -613,10 +619,10 @@ function viewRank() {
     var cls = (r.qualify_zone ? 'zone' : '') + (r.qualify_zone && seen === zoneCount ? ' cut' : '');
     h += '<tr class="' + cls + '"><td class="num">' + r.rank + '</td><td><a href="#" data-me="' + esc(r.player_id) + '">' + esc(r.name) + '</a>' + (r.playoff ? '<span class="badge warn">プレーオフ</span>' : '') + '</td>' +
       '<td class="num">' + r.rating + '</td><td class="num rkbonus">' + (r.bonus > 0 ? '+' : '') + r.bonus + '</td><td class="num"><b>' + r.total + '</b></td>' +
-      '<td class="num">' + quotaCell(r.matches, n(s.min_matches, 20)) + '</td><td class="num">' + quotaCell(r.team_matches, n(s.min_team_matches, 5)) + '</td></tr>';
+      '<td class="num">' + quotaCell(r.matches, n(s.min_matches, 15)) + '</td><td class="num">' + quotaCell(r.team_matches, n(s.min_team_matches, 5)) + '</td></tr>';
   });
   h += '</tbody></table></div>';
-  h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。色付きの行が通過圏内（上位' + q + '名）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 20) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
+  h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。色付きの行が通過圏内（上位' + q + '名）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
   if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + p.stats.matches + '試合 ' + p.stats.wins + '勝' + p.stats.losses + '敗' +
     (p.virtual_rating !== undefined && p.virtual_rating !== null ? '<br><span class="muted">変動した場合のレート（参考）: ' + p.virtual_rating + '</span>' : '') +
@@ -708,8 +714,8 @@ function viewPlay() {
     h += '</div>';
   }
   if (teamPick) return viewTeamPick();
-  // 新しい試合（画面2: 投擲順と先攻後攻）
-  if (startStep === 2 && pick[1].length && pick[2].length && startOpts.scoring === 'throws') return h + viewStartStep2();
+  // 新しい試合（画面2: 投擲順と先攻後攻）。この画面ではほかの試合中の一覧は出さない
+  if (startStep === 2 && pick[1].length && pick[2].length && startOpts.scoring === 'throws') return viewStartStep2();
   startStep = 1;
   h += '<div class="card"><h2>試合を始める</h2>';
   if (schCands) h += '<div class="schcands"><div><b>日程（' + esc(schCands.label) + '）の参加者</b>: ' + names(schCands.ids) + '<br><span class="muted">' + (pick[1].length + pick[2].length ? '1vs1 で入れました。チームを変えるときは枠をタップします。' : 'チームの枠をタップすると、選手選びでこの人たちが上に出ます。') + '</span></div><a href="#" data-schcands="1" aria-label="閉じる">×</a></div>';
@@ -1198,7 +1204,16 @@ function viewLog() {
   var h = '<div class="card"><h2>対戦履歴</h2>';
   var list = S.matches.filter(function (m) { return m.status === 'done' || m.status === 'void'; });
   if (!list.length) h += '<p class="muted">まだ試合がありません</p>';
-  list.slice(0, 200).forEach(function (m) { h += histCard(m); });
+  // 1日ごとに区切りを入れる（日本時間の日付。見出しに曜日と試合数）
+  list = list.slice(0, 200);
+  var cnt = {};
+  list.forEach(function (m) { var k = dayKey(m.started_at); cnt[k] = (cnt[k] || 0) + 1; });
+  var prev = null;
+  list.forEach(function (m) {
+    var k = dayKey(m.started_at);
+    if (k !== prev) { h += '<div class="logday"><b>' + esc(dayLabel(m.started_at)) + '</b><span class="muted">' + cnt[k] + '試合</span></div>'; prev = k; }
+    h += histCard(m);
+  });
   return h + '</div>';
 }
 
@@ -1213,7 +1228,7 @@ function viewMe() {
   if (!id) return h;
   var p = P(id), st = p.stats || { matches: 0, team_matches: 0, wins: 0, losses: 0 };
   var r = S.ranking.filter(function (x) { return x.player_id === id; })[0];
-  var minM = n(s.min_matches, 20), minT = n(s.min_team_matches, 5);
+  var minM = n(s.min_matches, 15), minT = n(s.min_team_matches, 5);
   var pf = (S.profiles && S.profiles[id]) || { s_w: 0, s_n: 0, t_w: 0, t_n: 0, wins: 0, losses: 0, matches: 0, avg: null, sets: 0, best: 0, cur: 0, w20: 0, w21: 0, l12: 0, l02: 0 };
   var eb = S.extra_bonus && S.extra_bonus[id];
 
@@ -1375,8 +1390,8 @@ function viewAdmin() {
     '<div class="row" style="margin-top:12px"><span><b>参考レートの開始値</b><br><span class="muted">空欄なら固定レート（' + fixedRates() + '）から始めます</span></span></div>' +
     '<div class="row" style="margin-top:6px"><input type="number" id="virtualStart" inputmode="numeric" placeholder="固定" value="' + (S.settings.virtual_initial_rating === null || S.settings.virtual_initial_rating === undefined ? '' : esc(S.settings.virtual_initial_rating)) + '">' +
     '<button class="btn small" id="virtualStartSave">保存</button></div>' +
-    '<div class="row" style="margin-top:12px"><span><b>参考合計の最低試合数</b><br><span class="muted">参考合計（参考レート＋ボーナス）を「達成」にする試合数。空欄なら予選と同じ（' + n(S.settings.min_matches, 20) + '試合）です</span></span></div>' +
-    '<div class="row" style="margin-top:6px"><input type="number" id="virtualMin" inputmode="numeric" placeholder="' + n(S.settings.min_matches, 20) + '" value="' + esc(S.settings.virtual_min_matches_raw === undefined || S.settings.virtual_min_matches_raw === null ? '' : S.settings.virtual_min_matches_raw) + '">' +
+    '<div class="row" style="margin-top:12px"><span><b>参考合計の最低試合数</b><br><span class="muted">参考合計（参考レート＋ボーナス）を「達成」にする試合数。空欄なら予選と同じ（' + n(S.settings.min_matches, 15) + '試合）です</span></span></div>' +
+    '<div class="row" style="margin-top:6px"><input type="number" id="virtualMin" inputmode="numeric" placeholder="' + n(S.settings.min_matches, 15) + '" value="' + esc(S.settings.virtual_min_matches_raw === undefined || S.settings.virtual_min_matches_raw === null ? '' : S.settings.virtual_min_matches_raw) + '">' +
     '<button class="btn small" id="virtualMinSave">保存</button></div>' +
     '<p class="muted" style="margin:6px 0 0">settings シートの virtual_rating_visible・virtual_initial_rating・virtual_min_matches と同じ設定です</p>' +
     '<div class="row" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><span><b>日程タブ</b><br><span class="muted">いつ対戦できるかを登録する時間割（非表示のあいだは参加の登録もできません。登録済みの内容は残ります）</span></span></div>' +
