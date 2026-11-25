@@ -147,6 +147,17 @@ t('参加条件未達は通過圏外、A は順位表に出ない、上位8名�
   eq(rows[0].player_id, 'q0'); eq(rows[0].qualify_zone, false);
   eq(rows.filter(r => r.qualify_zone).map(r => r.player_id), ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8']);
 });
+t('最低条件の既定は 15試合・うちチーム戦 5試合（settings が空欄のとき）', () => {
+  const ps = [{ player_id: 'a', name: 'a', initial_rating: 1500 }, { player_id: 'b', name: 'b', initial_rating: 1500 }, { player_id: 'c', name: 'c', initial_rating: 1500 }];
+  const res = G.computeRatings(ps, [], cfg);
+  res.stats.a = { matches: 15, team_matches: 5, wins: 0, losses: 0 };
+  res.stats.b = { matches: 14, team_matches: 5, wins: 0, losses: 0 };
+  res.stats.c = { matches: 15, team_matches: 4, wins: 0, losses: 0 };
+  const rows = G.buildRanking(ps, res, {}, {});
+  const el = {}; rows.forEach(r => { el[r.player_id] = r.eligible; });
+  eq(el, { a: true, b: false, c: false });
+});
+
 t('同点の並び: 合計→レート→試合数', () => {
   const ps = [{ player_id: 'a', name: 'a', initial_rating: 1500 }, { player_id: 'b', name: 'b', initial_rating: 1510 }, { player_id: 'c', name: 'c', initial_rating: 1500 }];
   const res = G.computeRatings(ps, [], cfg);
@@ -222,16 +233,16 @@ t('参考レートの表示は運営画面から切り替えられる（settings
   eq([r.data.settings.virtual_initial_rating, r.data.players.find(p => p.id === 'A').virtual_rating, r.data.players.find(p => p.id === 'A').rating], [1500, 1480, 1800]);
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_initial_rating', value: '' }); eq(r.ok, true, r.error);
   eq([r.data.settings.virtual_initial_rating, r.data.players.find(p => p.id === 'A').virtual_rating], [null, 1765]);
-  // 参考合計: 参考レート＋ボーナス、最低試合数（空欄なら min_matches=20）
+  // 参考合計: 参考レート＋ボーナス、最低試合数（空欄なら min_matches=15）
   a = r.data.players.find(p => p.id === 'A');
   eq([a.virtual_total.total, a.virtual_total.bonus, a.virtual_total.matches, a.virtual_total.min, a.virtual_total.eligible, r.data.settings.virtual_min_matches],
-     [1765 + r.data.extra_bonus.A.total, r.data.extra_bonus.A.total, 1, 20, false, 20]);
+     [1765 + r.data.extra_bonus.A.total, r.data.extra_bonus.A.total, 1, 15, false, 15]);
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_min_matches', value: '1.5' }); eq(r.ok, false);
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_min_matches', value: '1' }); eq(r.ok, true, r.error);
   a = r.data.players.find(p => p.id === 'A');
   eq([a.virtual_total.min, a.virtual_total.eligible, r.data.settings.virtual_min_matches, r.data.settings.virtual_min_matches_raw], [1, true, 1, 1]);
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_min_matches', value: '' }); eq(r.ok, true, r.error);
-  eq(r.data.players.find(p => p.id === 'A').virtual_total.min, 20);
+  eq(r.data.players.find(p => p.id === 'A').virtual_total.min, 15);
   // 参考レートを隠すと、参考合計と鴨王のボーナスも出さない
   r = g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: false }); eq(r.ok, true, r.error);
   a = r.data.players.find(p => p.id === 'A');

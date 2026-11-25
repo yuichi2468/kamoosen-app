@@ -59,7 +59,7 @@ var DEFAULT_SETTINGS = [
   ['min_loss', 10, '負けの最低減分'],
   ['max_team_size', 4, '1チームの最大人数'],
   ['max_singles_vs_same', 3, '同一選手との1vs1の上限'],
-  ['min_matches', 20, '参加条件: 最低試合数'],
+  ['min_matches', 15, '参加条件: 最低試合数'],
   ['min_team_matches', 5, '参加条件: 最低チーム戦数'],
   ['qualify_count', 8, '順位戦に進む人数'],
   ['admin_key', 'change-me', '運営画面のパスワード（必ず変更してください）'],
@@ -228,7 +228,7 @@ function computeRatings(players, matches, cfg) {
  */
 function buildRanking(players, result, bonusMap, cfg) {
   cfg = cfg || {};
-  var minM = num_(cfg.min_matches, 20), minT = num_(cfg.min_team_matches, 5), q = num_(cfg.qualify_count, 8);
+  var minM = num_(cfg.min_matches, 15), minT = num_(cfg.min_team_matches, 5), q = num_(cfg.qualify_count, 8);
   bonusMap = bonusMap || {};
   var rows = players.filter(function (p) {
     return result.fixed[String(p.player_id)] === undefined && p.active !== false && String(p.active).toUpperCase() !== 'FALSE';
@@ -409,7 +409,7 @@ function computeExtraBonus(players, matches, res, cfg, now) {
 /** 参考合計の最低試合数（空欄なら予選の最低試合数 min_matches と同じ） */
 function virtualMinMatches_(cfg) {
   var v = cfg && cfg.virtual_min_matches;
-  if (v === '' || v === null || v === undefined || isNaN(Number(v))) return num_(cfg && cfg.min_matches, 20);
+  if (v === '' || v === null || v === undefined || isNaN(Number(v))) return num_(cfg && cfg.min_matches, 15);
   return Number(v);
 }
 
@@ -510,7 +510,7 @@ function shortDate_(t) {
  */
 function computeAwards(players, matches, res, ranking, cfg) {
   cfg = cfg || {};
-  var minM = num_(cfg.min_matches, 20), minT = num_(cfg.min_team_matches, 5), step = Math.max(1, num_(cfg.memorial_step, 100));
+  var minM = num_(cfg.min_matches, 15), minT = num_(cfg.min_team_matches, 5), step = Math.max(1, num_(cfg.memorial_step, 100));
   var name = {}, target = {}, rookie = {};
   players.forEach(function (p) {
     var id = String(p.player_id);
