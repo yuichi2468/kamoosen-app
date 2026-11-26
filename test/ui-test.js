@@ -53,6 +53,20 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('table');
   await page.screenshot({ path: path.join(out, '1_ranking.png'), fullPage: true });
   {
+    // ヘッダーの「更新」: ほかの端末で登録された試合が、押すとすぐ画面に出る
+    const before = await page.evaluate(() => S.matches.length);
+    const r = g.api('start', { team1: ['P10'], team2: ['P11'] }); if (!r.ok) throw new Error(r.error);
+    const box = await page.$eval('#reloadBtn', b => { const a = b.getBoundingClientRect(), c = document.getElementById('adminBtn').getBoundingClientRect(); return [a.right <= c.left, Math.abs(a.top - c.top) < 2]; });
+    if (!box[0] || !box[1]) throw new Error('更新ボタンが運営ボタンの左にない ' + box);
+    await page.click('#reloadBtn');
+    await page.waitForFunction(n => S.matches.length === n + 1 && !document.getElementById('reloadBtn').disabled, before);
+    await page.screenshot({ path: path.join(out, '1a_reload.png'), clip: { x: 0, y: 0, width: 390, height: 120 } });
+    g.api('cancel', { match_id: r.data.matches.find(m => m.status === 'playing').id });
+    await page.click('#reloadBtn');
+    await page.waitForFunction(() => !document.getElementById('reloadBtn').disabled);
+    console.log('reload button ok');
+  }
+  {
     // 最低試合数を満たした人がいなくても、上位8位の下に区切り線を引く
     const cut = await page.$$eval('.rktable tbody tr', r => r.map((x, i) => x.classList.contains('cut') ? i : -1).filter(i => i >= 0));
     const ranks = await page.$$eval('.rktable tbody tr td:first-child', x => x.map(y => +y.textContent));
@@ -83,6 +97,17 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('.preview');
   if ((await page.textContent('.preview')).includes('勝てば')) throw new Error('増減の見込みが残っている');
   const preview = await page.textContent('.preview');
+  {
+    // 平均レート: 鴨王が1人なら固定、ほかの人と組めば参考レート（サーバーの計算と同じ）
+    const v = await page.evaluate(() => { const a = P('A'), b = P('P01'); return [teamAvg(['A']), teamAvg(['A', 'P01']), (a.virtual_rating + b.rating) / 2, a.virtual_rating !== a.rating]; });
+    console.log('teamAvg A / A+P01:', v.join(' '));
+    if (v[0] !== 1800 || v[1] !== v[2] || !v[3]) throw new Error('鴨王を含む平均レートが違う ' + v);
+    const keep = await page.evaluate(() => { const k = pick[2].slice(); pick[2] = ['A', 'P01']; render(); return k; });
+    const pv = await page.textContent('.preview');
+    if (!pv.includes('1677.5') || !pv.includes('参考レートで平均')) throw new Error('組んだときの平均レートの表示が違う ' + pv);
+    await page.locator('.preview').screenshot({ path: path.join(out, '2b_preview_teamed.png') });
+    await page.evaluate(k => { pick[2] = k; render(); }, keep);
+  }
   await page.screenshot({ path: path.join(out, '2_start.png'), fullPage: true });
   await page.click('[data-opt=scoring][data-v=manual]');
   await page.click('#startBtn');
