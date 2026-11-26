@@ -90,6 +90,11 @@ jobs:
           API="https://script.google.com/macros/s/${GAS_DEPLOYMENT_ID}/exec"
           sed "s#^var API_URL = '';#var API_URL = '${API}';#" index.html > site/index.html
           grep -q "^var API_URL = 'https://script.google.com/" site/index.html || { echo "::error::index.html の API_URL 行が見つかりません"; exit 1; }
+          # 観戦用ページ（見るだけ）: …/watch/ に同じ画面を「見るだけ」の印付きで書き出す（観戦用リンク 設計書）
+          mkdir -p site/watch
+          sed -e "s#^var VIEW_ONLY = false;#var VIEW_ONLY = true;#" -e "s#<title>鴨王戦 予選レート戦</title>#<title>鴨王戦 予選（観戦用）</title>#" site/index.html > site/watch/index.html
+          grep -q "^var VIEW_ONLY = true;" site/watch/index.html || { echo "::error::index.html の VIEW_ONLY 行が見つかりません"; exit 1; }
+          grep -q "<title>鴨王戦 予選（観戦用）</title>" site/watch/index.html || { echo "::error::index.html の title が見つかりません"; exit 1; }
           touch site/.nojekyll
 
       - uses: actions/configure-pages@v5

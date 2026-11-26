@@ -381,6 +381,9 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .tpsec { font-size: 12px; color: var(--muted); font-weight: 700; margin: 6px 0 0; }
 @media (max-width: 480px) { .teams { grid-template-columns: 1fr; } .hide-sm { display: none; } }
 @media (max-width: 480px) { nav button { min-width: 0; padding: 12px 2px; font-size: 13px; } }
+.viewbanner { background: var(--card); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; padding: 6px 16px; text-align: center; }
+body.viewonly header h1 { padding-right: 60px; }
+body.viewonly .reloadbtn { right: 12px; }
 </style>
 </head>
 <body>
@@ -392,12 +395,14 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 </header>
 <nav id="tabs">
   <button data-tab="rank" class="on">ランキング</button>
+  <button data-tab="live" hidden>試合中</button>
   <button data-tab="play">試合</button>
   <button data-tab="log">履歴</button>
   <button data-tab="me">個人</button>
   <button data-tab="awards">特別賞</button>
   <button data-tab="sched">日程</button>
 </nav>
+<div class="viewbanner" id="viewBanner" hidden>観戦用のページです（見るだけ）・記録は参加者用のアプリで</div>
 <main id="main"><div class="loading">読み込み中…</div></main>
 <div class="toast" id="toast"></div>
 <div class="sendnotice" id="sendNotice" role="alert" hidden></div>
@@ -406,6 +411,8 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 /* 外部（GitHub Pages など）に置く場合は、Apps Script ウェブアプリの URL をここに入れる。
    Apps Script から直接開く場合は空のままでよい。 */
 var API_URL = '';
+/* 観戦用ページ（見るだけ）。GitHub Pages の …/watch/ を書き出すときだけ true になる（観戦用リンク 設計書） */
+var VIEW_ONLY = false;
 
 var S = null;          // サーバーから受け取った状態
 var tab = 'rank';
@@ -425,8 +432,11 @@ var syncing = false, syncTimer = null;
 
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
+// 観戦用ページで呼んでよい読み取りの API。これ以外（試合の開始・記録・日程・運営）は送らずに止める
+var VIEW_READ = { state: 1, matchThrows: 1, watch: 1 };
 function call(action, payload) {
   payload = payload || {};
+  if (VIEW_ONLY && !VIEW_READ[action]) return Promise.reject(new Error('観戦用のページでは記録できません'));
   if (window.google && google.script && google.script.run) {
     return new Promise(function (res, rej) {
       google.script.run.withSuccessHandler(function (r) {
@@ -590,12 +600,14 @@ function render() {
   var s = S.settings;
   s.end_at_label = function () { var now = Date.now(); if (now < s.start_at) return '開始前'; if (now >= s.end_at) return '試合開始は締切済み'; var h = Math.floor((s.end_at - now) / 3600000); return '残り ' + Math.floor(h / 24) + '日' + (h % 24) + '時間'; };
   document.getElementById('period').textContent = '期間 ' + fmt(s.start_at) + ' 〜 ' + fmt(s.end_at) + '（' + s.end_at_label() + '）';
-  var schOnTab = s.sched_visible !== false; // 日程タブは運営画面で非表示にできる
+  var schOnTab = s.sched_visible !== false && !VIEW_ONLY; // 日程タブは運営画面で非表示にできる（観戦用ページでは出さない）
+  if (VIEW_ONLY && (tab === 'play' || tab === 'admin' || tab === 'sched')) tab = 'rank';
   if (!schOnTab && tab === 'sched') { schLeave(); schOpen = schForm = schBulk = null; tab = 'rank'; }
   if (!schOnTab) schCands = null;
   document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'sched') b.hidden = !schOnTab; });
+  if (VIEW_ONLY) { var nLive = S.matches.filter(function (m) { return m.status === 'playing'; }).length; document.querySelector('#tabs [data-tab=live]').textContent = '試合中' + (nLive ? ' ' + nLive : ''); }
   document.getElementById('adminBtn').classList.toggle('on', tab === 'admin');
-  var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched })[tab]();
+  var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched, live: viewLive })[tab]();
   var osw = document.querySelector('.sctwrap.live'), keepY = watchId && osw && osw.scrollTop + osw.clientHeight < osw.scrollHeight - 4 ? osw.scrollTop : null; // 観戦中に上の方を見ていたら、更新しても動かさない
   document.getElementById('main').innerHTML = html;
   var sw = document.querySelector('.sctwrap.live'); if (sw) sw.scrollTop = keepY !== null ? keepY : sw.scrollHeight; // 最新のターンが見えるように
@@ -844,12 +856,23 @@ function liveLine(m) {
 
 // 試合中の一覧の1試合。タップすると観戦画面（引き継ぎ・取り消しなどの操作はそこで出す。設計書 第21章）
 function matchCard(m) {
-  var thr = m.scoring === 'throws', mineDev = m.scorer === '端末' + deviceId();
+  var thr = m.scoring === 'throws', mineDev = !VIEW_ONLY && m.scorer === '端末' + deviceId();
   var h = '<div class="match tap" data-watch="' + esc(m.id) + '" role="button" tabindex="0"><div class="vs"><div class="side t1">' + names(m.team1) + '</div><div class="muted">vs</div><div class="side t2">' + names(m.team2) + '</div></div>';
   h += '<div class="meta">開始 ' + fmt(m.started_at) + (thr ? '　1投ごとに記録' + (m.use_order ? '（投擲順あり）' : '') + (mineDev ? '　<b>この端末で記録中</b>' : '') : '　結果だけ入力') + '</div>';
   if (thr) h += liveLine(m);
   h += '<div class="tapfoot">' + (thr && mineDev ? '<button class="btn small" data-score="' + esc(m.id) + '">スコア入力に戻る</button>' : '<span></span>') +
-    '<span class="tapgo">' + (thr ? '観戦する' : '結果を入力する') + ' ›</span></div>';
+    '<span class="tapgo">' + (thr ? '観戦する' : VIEW_ONLY ? '結果だけ入力の試合（スコア表なし）' : '結果を入力する') + ' ›</span></div>';
+  return h + '</div>';
+}
+
+/* ---- 試合中（観戦用ページだけのタブ。観戦用リンク 設計書 4章）: 試合中の一覧と試合の観戦画面。操作はなし ---- */
+function viewLive() {
+  if (watchId) return viewWatch();
+  var playing = S.matches.filter(function (m) { return m.status === 'playing'; });
+  var h = '<div class="card"><h2>試合中</h2>';
+  if (!playing.length) return h + '<p class="muted">いま試合中の試合はありません。</p></div>';
+  h += '<p class="muted" style="margin-top:0">タップするとスコア表が見られます（約' + (WATCH_MS / 1000) + '秒ごとに更新）。</p>';
+  playing.forEach(function (m) { h += matchCard(m); });
   return h + '</div>';
 }
 
@@ -876,7 +899,7 @@ function pollWatch() {
   }).catch(function () { if (watchId !== id) return; watchErr = true; watchRender(); next(); });
 }
 // 入力中（結果だけ入力の欄など）は描き直さない
-function watchRender() { if (tab === 'play' && watchId && !scoringId && !document.activeElement.matches('input,select')) render(); }
+function watchRender() { if ((tab === 'play' || tab === 'live') && watchId && !scoringId && !document.activeElement.matches('input,select')) render(); }
 
 function scoreBoard(st, m) {
   return '<div class="board">' + [1, 2].map(function (t) {
@@ -922,7 +945,7 @@ function viewWatch() {
     else h += liveTables(st, m, m.id, (m.throws || []).length);
     if (live) h += '<p class="muted" style="margin:6px 0 0;font-size:12px">約' + (WATCH_MS / 1000) + '秒ごとに自動で更新します。見ているだけなら、記録している端末には影響しません。</p>';
   }
-  if (live) h += watchOps(m);
+  if (live && !VIEW_ONLY) h += watchOps(m); // 観戦用ページには「この試合の操作」を出さない
   return h + '</div>';
 }
 
@@ -955,6 +978,7 @@ function lcSave(mid) { if (LC[mid]) store('kamo_sc_' + mid, JSON.stringify(LC[mi
 function lcDrop(mid) { delete LC[mid]; try { localStorage.removeItem('kamo_sc_' + mid); } catch (e) {} }
 
 function openScoring(mid) {
+  if (VIEW_ONLY) return; // 観戦用ページではスコア入力を開かない
   var m = findM(mid);
   if (!m) return;
   var loc = lcLoad(mid);
@@ -1499,7 +1523,7 @@ function schSet(d) {
   }
 }
 // 日程タブに入ったとき・戻ってきたとき: 前回閉じた時刻を新着の基準にする（初めてなら新着なし）
-function schEnter() { var v = Number(store('kamo_sched_closed')); schBase = v > 0 ? v : -1; loadSched(); } // -1: 初めて（読み込んだ時刻を基準にする）
+function schEnter() { if (VIEW_ONLY) return; var v = Number(store('kamo_sched_closed')); schBase = v > 0 ? v : -1; loadSched(); } // -1: 初めて（読み込んだ時刻を基準にする）
 function schLeave() { if (schBase !== null && SCH) store('kamo_sched_closed', String(schNow())); schBase = null; }
 
 function schMine(d, h) { return (SCH.by[schKey(d, h)] || []).filter(function (x) { return x.p === schMe; })[0]; }
@@ -2041,6 +2065,15 @@ document.getElementById('main').addEventListener('click', function (e) {
   if (d.restore) { act('adminRestore', { admin_key: adminKey, match_id: d.restore }, '元に戻しました'); return; }
 });
 
+if (VIEW_ONLY) { // 観戦用ページ: 試合・日程タブと運営ボタンを消し、試合中タブと帯を出す
+  document.body.classList.add('viewonly');
+  document.title = '鴨王戦 予選（観戦用）';
+  document.querySelector('header h1').textContent = '鴨王戦 予選（観戦用）';
+  ['play', 'sched'].forEach(function (k) { var b = document.querySelector('#tabs [data-tab=' + k + ']'); b.parentNode.removeChild(b); });
+  document.querySelector('#tabs [data-tab=live]').hidden = false;
+  document.getElementById('adminBtn').style.display = 'none';
+  document.getElementById('viewBanner').hidden = false;
+}
 load();
 setInterval(function () {
   if (document.visibilityState !== 'visible' || syncing) return;

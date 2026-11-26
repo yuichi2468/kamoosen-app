@@ -31,16 +31,22 @@ seed.forEach(([a, b, l1, l2]) => {
 }
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const viewCalls = [];
 let slow = 0; // 送信中の表示を確認するため、応答を遅らせる（ミリ秒）
 const server = http.createServer((req, res) => {
   if (req.method === 'POST') {
     let body = ''; req.on('data', c => body += c); req.on('end', () => {
-      const b = JSON.parse(body); const r = g.api(b.action, b.payload);
+      const b = JSON.parse(body);
+      if (/\/watch\//.test(req.headers.referer || '')) viewCalls.push(b.action); // 観戦用ページから呼ばれた API
+      const r = g.api(b.action, b.payload);
       setTimeout(() => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(r)); }, slow);
     }); return;
   }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(html.replace("var API_URL = '';", "var API_URL = '/api';"));
+  let h = html.replace("var API_URL = '';", "var API_URL = '/api';");
+  // 観戦用ページ（…/watch/）: 公開の手順（deploy-gas.yml）と同じ置き換え
+  if (req.url.indexOf('/watch/') === 0) h = h.replace(/^var VIEW_ONLY = false;/m, 'var VIEW_ONLY = true;').replace('<title>鴨王戦 予選レート戦</title>', '<title>鴨王戦 予選（観戦用）</title>');
+  res.end(h);
 });
 
 (async () => {
@@ -453,6 +459,64 @@ const server = http.createServer((req, res) => {
     console.log('canceled match status:', cm.status, cm.note);
     if (cm.status !== 'void') throw new Error('試合が取り消されていない');
     await page.screenshot({ path: path.join(out, '21_after_cancel.png'), fullPage: true });
+  }
+  {
+    // ---- 観戦用ページ（観戦用リンク 設計書）: 見るだけ。試合・日程タブと運営ボタンがなく、書き込みの API を呼ばない ----
+    const N = p => ({ kind: 'normal', points: p }), X = { kind: 'miss' };
+    let r = g.api('start', { team1: ['P02', 'P03'], team2: ['P04'], scoring: 'throws', first_team: 1, use_order: true, device: 'other' }); if (!r.ok) throw new Error(r.error);
+    const vmid = r.data.matches.find(m => m.status === 'playing' && m.team2.join() === 'P04').id;
+    r = g.api('sync', { match_id: vmid, throws: [N(7), N(3), X], leg_orders: [], base_rev: 0, device: 'other' }); if (!r.ok) throw new Error(r.error);
+    const manual = g.api('start', { team1: ['P05'], team2: ['P06'], device: 'other' }); if (!manual.ok) throw new Error(manual.error);
+    const vp = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+    vp.on('pageerror', e => errors.push('watch: ' + e.message));
+    // この端末に参加者用アプリで記録中の試合が残っていても、スコア入力は開かない
+    await vp.goto(url + 'watch/');
+    await vp.waitForSelector('table');
+    const tabs = await vp.$$eval('#tabs button', b => b.filter(x => !x.hidden).map(x => x.textContent.trim()));
+    console.log('view tabs:', tabs.join(' / '));
+    if (tabs.join('/') !== 'ランキング/試合中 2/履歴/個人/特別賞') throw new Error('観戦用ページのタブがおかしい: ' + tabs);
+    if (await vp.isVisible('#adminBtn')) throw new Error('観戦用ページに運営ボタンがある');
+    if (!(await vp.isVisible('#reloadBtn'))) throw new Error('観戦用ページに更新ボタンがない');
+    if (!/観戦用のページです/.test(await vp.textContent('#viewBanner'))) throw new Error('観戦用の帯がない');
+    if ((await vp.title()) !== '鴨王戦 予選（観戦用）') throw new Error('タイトルが違う: ' + (await vp.title()));
+    await vp.screenshot({ path: path.join(out, '30_view_ranking.png'), fullPage: true });
+    // ランキングの名前 → 個人タブ
+    await vp.click('[data-me="P01"]');
+    await vp.waitForSelector('.hero');
+    if (!/青木/.test(await vp.textContent('.heroname'))) throw new Error('観戦用ページで個人タブが開かない');
+    // 履歴: 1投ごとに記録した試合のスコア表が開く
+    await vp.click('nav button[data-tab=log]');
+    await vp.waitForSelector('[data-sct]');
+    await vp.click('[data-sct]');
+    await vp.waitForSelector('[data-scback]');
+    await vp.click('[data-scback]');
+    // 試合中タブ: 一覧に操作ボタンがなく、タップで観戦画面。「この試合の操作」は出ない
+    await vp.click('nav button[data-tab=live]');
+    await vp.waitForSelector('[data-watch="' + vmid + '"]');
+    if (await vp.$('#main [data-score],#main [data-take],#main [data-cancel],#main [data-manual],#main #startBtn,#main #nextStep')) throw new Error('観戦用ページの試合中の一覧に操作ボタンがある');
+    if (!/結果だけ入力の試合（スコア表なし）/.test(await vp.textContent('#main'))) throw new Error('結果だけ入力の試合の表示がない');
+    await vp.screenshot({ path: path.join(out, '31_view_live.png'), fullPage: true });
+    await vp.click('[data-watch="' + vmid + '"]');
+    await vp.waitForFunction(() => /観戦中/.test(document.body.textContent));
+    r = g.api('sync', { match_id: vmid, throws: [N(7), N(3), X, N(12)], leg_orders: [], base_rev: 1, device: 'other' }); if (!r.ok) throw new Error(r.error);
+    await vp.waitForFunction(() => /15/.test(document.querySelector('.board').textContent), null, { timeout: 15000 });
+    if (await vp.$('.ops,[data-take],[data-score],[data-cancel],[data-manual]')) throw new Error('観戦用ページに「この試合の操作」がある');
+    await vp.screenshot({ path: path.join(out, '32_view_watch.png'), fullPage: true });
+    { const wm = g.api('state').data.matches.find(m => m.id === vmid); if (wm.rev !== 2 || wm.scorer !== '端末other') throw new Error('観戦用ページで記録に影響した: ' + wm.rev + ' ' + wm.scorer); }
+    // 結果だけ入力の試合を開いても、結果入力の欄は出ない
+    await vp.click('#watchBack');
+    await vp.click('[data-watch="' + manual.data.matches.find(m => m.status === 'playing' && m.team1.join() === 'P05').id + '"]');
+    await vp.waitForSelector('#watchBack');
+    if (await vp.$('[data-result],[data-f=legs1]')) throw new Error('観戦用ページに結果入力の欄がある');
+    // 画面の外から書き込みを呼んでも送られない
+    const blocked = await vp.evaluate(() => call('start', { team1: ['P07'], team2: ['P08'] }).then(() => 'sent', e => e.message));
+    if (!/観戦用/.test(blocked)) throw new Error('観戦用ページから書き込みが送られた: ' + blocked);
+    const writes = viewCalls.filter(a => !['state', 'matchThrows', 'watch'].includes(a));
+    console.log('view api calls:', [...new Set(viewCalls)].join(','));
+    if (writes.length) throw new Error('観戦用ページが書き込みの API を呼んだ: ' + writes);
+    await vp.close();
+    g.api('cancel', { match_id: vmid }); g.api('cancel', { match_id: manual.data.matches.find(m => m.status === 'playing' && m.team1.join() === 'P05').id });
+    console.log('view-only page ok');
   }
   console.log('page errors:', errors.length ? errors : 'none');
   await browser.close(); server.close();

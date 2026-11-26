@@ -874,5 +874,13 @@ t('index.html の computeDelta と Code.gs の結果が同じ', () => {
   }
 });
 
+t('観戦用ページの書き出し: index.html に公開の手順が置き換える行がある', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const wf = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'deploy-gas.yml'), 'utf8');
+  assert.ok(/^var VIEW_ONLY = false;$/m.test(html), 'var VIEW_ONLY = false; の行がない');
+  assert.ok(html.includes('<title>鴨王戦 予選レート戦</title>'), 'title がない');
+  assert.ok(wf.includes('site/watch/index.html'), '公開の手順に観戦用ページがない');
+});
+
 console.log(`\n${pass} 件成功 / ${fail} 件失敗`);
 process.exit(fail ? 1 : 0);
