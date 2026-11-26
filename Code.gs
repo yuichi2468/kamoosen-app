@@ -137,7 +137,8 @@ function pairKey_(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
  * 戻り値: { ratings, fixed, stats, deltas, history, singlesCount, virtual, virtualHistory }
  * virtual: レート固定の人が「ほかの人と同じように変動した場合」のレート（参考値）。
  *   固定レート（settings の virtual_initial_rating が入っていればその値）から始め、各試合で自分のチーム平均だけを参考レートに置き換えて増減を計算する。
- *   公式のレート（ratings）と相手側の計算には一切影響しない。
+ * レート固定の人が ほかの人と組んで出た試合（チームに味方がいる）は、公式の計算でもその人を参考レートとして平均を出す
+ *   （味方・相手のレート変動に効く）。1vs1・1人vs複数では固定レートのまま。鴨王本人の公式レートはどちらでも変わらない。
  */
 function virtualStart_(cfg) {
   var v = cfg && cfg.virtual_initial_rating;
@@ -174,17 +175,22 @@ function computeRatings(players, matches, cfg) {
       deltas[m.match_id] = { error: '不明な選手を含む' };
       return;
     }
-    var avg = function (t) { return t.reduce(function (s, id) { return s + ratings[id]; }, 0) / t.length; };
+    // 計算に使うレート: レート固定の人（鴨王）は、1人のチーム（1vs1・1人vs複数）なら固定レート、
+    // ほかの人と組んだチームなら参考レート（試合前の値）を使う
+    var vBefore = {};
+    all.forEach(function (id) { if (fixed[id] !== undefined) vBefore[id] = virtual[id]; });
+    var eff = function (id, team) { return fixed[id] !== undefined && team.length > 1 ? vBefore[id] : ratings[id]; };
+    var avg = function (t) { return t.reduce(function (s, id) { return s + eff(id, t); }, 0) / t.length; };
     var a1 = avg(t1), a2 = avg(t2);
     var w = Number(m.winner);
     var d = w === 1 ? computeDelta(a1, a2, cfg) : computeDelta(a2, a1, cfg);
     var d1 = w === 1 ? d.gain : -d.loss, d2 = w === 1 ? -d.loss : d.gain;
     var isTeam = !(t1.length === 1 && t2.length === 1);
-    // レート固定の人の参考レート: 自分のチーム平均だけ参考レートで計算し直す（公式の計算は変えない）
+    // レート固定の人の参考レート: 自分を参考レートに置き換えたチーム平均で増減を計算する（公式の計算は変えない）
     var shadow = function (team, opp, won) {
       team.forEach(function (id) {
         if (fixed[id] === undefined) return;
-        var own = team.reduce(function (s, x) { return s + (x === id ? virtual[id] : ratings[x]); }, 0) / team.length;
+        var own = team.reduce(function (s, x) { return s + (x === id ? vBefore[id] : eff(x, team)); }, 0) / team.length;
         var vd = computeDelta(won ? own : avg(opp), won ? avg(opp) : own, cfg);
         var dv = won ? vd.gain : -vd.loss;
         virtual[id] += dv;

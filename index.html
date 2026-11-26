@@ -15,7 +15,12 @@
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; font-size: 15px; line-height: 1.5; }
 header { background: var(--accent); color: var(--accent-ink); padding: 14px 16px 10px; }
 header { position: relative; }
-header h1, header .sub { padding-right: 52px; }
+header h1 { padding-right: 112px; }
+.reloadbtn { position: absolute; top: 10px; right: 62px; background: transparent; color: var(--accent-ink); border: 1px solid currentColor; opacity: .7; border-radius: 8px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+.reloadbtn:disabled { opacity: .4; cursor: default; }
+.reloadbtn .ri { display: inline-block; }
+.reloadbtn.busy .ri { animation: rspin .8s linear infinite; }
+@keyframes rspin { to { transform: rotate(360deg); } }
 .adminbtn { position: absolute; top: 10px; right: 12px; background: transparent; color: var(--accent-ink); border: 1px solid currentColor; opacity: .7; border-radius: 8px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
 .adminbtn.on { opacity: 1; background: rgba(255,255,255,.15); }
 header h1 { margin: 0; font-size: 18px; letter-spacing: .04em; }
@@ -380,6 +385,7 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 </head>
 <body>
 <header>
+  <button id="reloadBtn" class="reloadbtn" aria-label="最新の情報に更新"><span class="ri">↻</span> 更新</button>
   <button id="adminBtn" class="adminbtn" aria-label="運営メニュー">運営</button>
   <h1>鴨王戦 予選レート戦</h1>
   <div class="sub" id="period"></div>
@@ -700,7 +706,17 @@ function myAwards(id) {
 }
 
 /* ---- 試合 ---- */
-function teamAvg(ids) { return ids.reduce(function (a, id) { return a + P(id).rating; }, 0) / ids.length; }
+// レートの計算に使う平均。レート固定の人（鴨王）は、1人のチームなら固定レート、ほかの人と組んだら参考レート（サーバーと同じ）
+// 参考レートを非表示にしているときは数字を出せないので null
+function teamAvg(ids) {
+  var sum = 0;
+  for (var i = 0; i < ids.length; i++) {
+    var p = P(ids[i]);
+    if (p.fixed && ids.length > 1) { if (p.virtual_rating === undefined || p.virtual_rating === null) return null; sum += p.virtual_rating; }
+    else sum += p.rating;
+  }
+  return sum / ids.length;
+}
 function busySet() { var b = {}; S.matches.forEach(function (m) { if (m.status === 'playing') m.team1.concat(m.team2).forEach(function (id) { b[id] = 1; }); }); return b; }
 function singles(a, b) { return S.singles[a < b ? a + '|' + b : b + '|' + a] || 0; }
 
@@ -743,7 +759,10 @@ function singlesFull() { // 同じ2人の1vs1が上限に達しているか（�
 }
 function startPreview() {
   if (!(pick[1].length && pick[2].length)) return '';
-  var h = '<div class="preview">平均レート チーム1 <b>' + teamAvg(pick[1]).toFixed(1) + '</b> ／ チーム2 <b>' + teamAvg(pick[2]).toFixed(1) + '</b></div>';
+  var av = function (t) { var a = teamAvg(pick[t]); return a === null ? '－' : a.toFixed(1); };
+  var teamed = [1, 2].some(function (t) { return pick[t].length > 1 && pick[t].some(function (id) { return P(id).fixed; }); });
+  var h = '<div class="preview">平均レート チーム1 <b>' + av(1) + '</b> ／ チーム2 <b>' + av(2) + '</b>' +
+    (teamed ? '<div class="muted">鴨王がほかの人と組むときは、鴨王の参考レートで平均を出します</div>' : '') + '</div>';
   if (singlesFull()) h += '<div class="warnbox">この2人の1vs1は上限の' + n(S.settings.max_singles_vs_same, 3) + '試合に達しています</div>';
   return h;
 }
@@ -1926,6 +1945,17 @@ window.addEventListener('pagehide', function () { if (tab === 'sched') schLeave(
 window.addEventListener('resize', function () { if (tab === 'sched' && SCH && !schForm && !schBulk) { var c = schCols(); if (c !== schCols.last) { schCols.last = c; render(); } } });
 
 /* ---- イベント ---- */
+// ヘッダーの「更新」: 最新のデータを読み込み直す（日程タブを開いていれば日程も）
+document.getElementById('reloadBtn').addEventListener('click', function () {
+  var b = this;
+  if (b.disabled) return;
+  b.disabled = true; b.classList.add('busy');
+  var jobs = [call('state').then(function (d) { S = d; render(); })];
+  if (tab === 'sched') jobs.push(loadSched());
+  Promise.all(jobs).then(function () { toast('最新の情報にしました'); })
+    .catch(function (e) { toast('更新できませんでした: ' + (e.message || e), true); })
+    .then(function () { b.disabled = false; b.classList.remove('busy'); });
+});
 document.getElementById('adminBtn').addEventListener('click', function () { if (tab === 'sched') schLeave(); scoreView = null; tab = 'admin'; render(); window.scrollTo(0, 0); });
 document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; closeWatch(); if (tab === 'sched' && b.dataset.tab !== 'sched') schLeave(); if (tab !== 'sched' && b.dataset.tab === 'sched') schEnter(); schOpen = schForm = schBulk = null; tab = b.dataset.tab; render(); } });
 document.getElementById('main').addEventListener('toggle', function (e) { var k = e.target.dataset && e.target.dataset.sec; if (k) store('kamo_sec_' + k, e.target.open ? '1' : '0'); }, true);

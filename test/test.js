@@ -66,7 +66,7 @@ t('参考レート: 1500 に負けた A は、1800 から変動した場合 -35�
   eq(r.virtualHistory.A, [{ match_id: 'm1', at: 1, delta: -35, rating: 1765 }]);
   eq(r.history.A[0].delta, 0);
 });
-t('参考レートは前の試合の参考レートで次を計算し、相手の増減は変えない', () => {
+t('参考レートは前の試合の参考レートで次を計算し、組んだ試合では味方・相手の計算にも参考レートを使う', () => {
   // m1: A が p1 に負け → 参考1765。m2: A(参考1765) が p3 に負け → -(20+265*0.05)=-33.25→-33 → 1732
   const ms = [
     { match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' },
@@ -74,11 +74,35 @@ t('参考レートは前の試合の参考レートで次を計算し、相手�
     { match_id: 'm3', started_at: 3, team1_ids: 'A,p1', team2_ids: 'p4,p2', winner: 1, status: 'done' },
   ];
   const r = G.computeRatings(players, ms, cfg);
-  // 公式のレート（相手・味方を含む）は参考レートの計算があっても今までどおり（変更前のコードと同じ値）
-  eq([r.ratings.A, r.ratings.p1, r.ratings.p3, r.ratings.p4, r.ratings.p2], [1800, 1556, 1542, 1488, 1513]);
+  // m1・m2（1vs1）は固定1800で計算。m3（A が p1 と組む）は A を参考1732 として平均:
+  // (1732+1542)/2=1637 vs (1500+1525)/2=1512.5 → 差124.5 → 勝ち +24-7.47=16.53→17 / 負け -(20-6.225)=-13.775→-14
+  eq([r.ratings.A, r.ratings.p1, r.ratings.p3, r.ratings.p4, r.ratings.p2], [1800, 1559, 1542, 1486, 1511]);
+  eq(r.deltas.m3, { team1: 17, team2: -14, avg1: 1637, avg2: 1512.5 });
   eq(r.virtualHistory.A.map(x => x.rating).slice(0, 2), [1765, 1732]);
-  // m3: 参考の自チーム平均 (1732+1542)/2=1637 vs (1500+1525)/2=1512.5 → 差124.5 → +24-7.47=16.53→17
-  eq(r.virtual.A, 1749);
+  eq(r.virtual.A, 1749); // 参考レートも同じ平均で +17
+});
+t('鴨王が1人のチーム（1人vs複数）は、参考レートが下がっていても固定レートで計算', () => {
+  const ms = [
+    { match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }, // A 参考 1765
+    { match_id: 'm2', started_at: 2, team1_ids: 'A', team2_ids: 'p3,p4', winner: 2, status: 'done' },
+  ];
+  const r = G.computeRatings(players, ms, cfg);
+  // m2: 1800 vs 1500 → p3,p4 勝ち +24+18=42
+  eq(r.deltas.m2, { team1: -35, team2: 42, avg1: 1800, avg2: 1500 });
+  eq([r.ratings.A, r.ratings.p3, r.ratings.p4], [1800, 1542, 1542]);
+  // 参考レートは 1765 vs 1500 で -(20+265*0.05)=-33.25→-33
+  eq(r.virtual.A, 1732);
+});
+t('鴨王が組んだチームの相手も、鴨王の参考レートで出した平均と比べて計算', () => {
+  const ms = [
+    { match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }, // A 参考 1765
+    { match_id: 'm2', started_at: 2, team1_ids: 'p3,p4', team2_ids: 'A,p2', winner: 1, status: 'done' },
+  ];
+  const r = G.computeRatings(players, ms, cfg);
+  // m2: 1500 vs (1765+1525)/2=1645 → p3,p4 勝ち +24+8.7=32.7→33 / A側 -(20+7.25)=-27.25→-27
+  eq(r.deltas.m2, { team1: 33, team2: -27, avg1: 1500, avg2: 1645 });
+  eq([r.ratings.A, r.ratings.p2, r.ratings.p3], [1800, 1498, 1533]);
+  eq(r.virtual.A, 1738);
 });
 t('参考レートの開始値を設定すると、その値から変動する（公式は変わらない）', () => {
   const m = [{ match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }];
