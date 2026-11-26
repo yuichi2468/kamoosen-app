@@ -30,7 +30,13 @@ nav button { flex: 1; min-width: 64px; white-space: nowrap; border: 0; backgroun
 nav button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
 main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
 .logday { display: flex; justify-content: space-between; align-items: baseline; margin: 16px -14px 8px; padding: 6px 14px; background: rgba(120,120,140,.12); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 15px; }
-.logday:first-of-type { margin-top: 4px; }
+details.logdays:first-of-type .logday { margin-top: 4px; }
+details.logdays summary.logday { cursor: pointer; list-style: none; -webkit-tap-highlight-color: transparent; }
+details.logdays summary.logday::-webkit-details-marker { display: none; }
+details.logdays summary.logday b::before { content: '▸'; display: inline-block; width: 1.1em; color: var(--muted); }
+details.logdays[open] summary.logday b::before { content: '▾'; }
+details.logdays:not([open]) summary.logday { margin-bottom: 0; }
+details.logdays:not([open]) + details.logdays summary.logday { margin-top: -1px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
 .card h2 { font-size: 16px; margin: 0 0 10px; }
 .muted { color: var(--muted); font-size: 13px; }
@@ -420,6 +426,7 @@ var listOpen = {}; // 個人ページの「組んだ人・戦った相手」の�
 var pick = { 1: [], 2: [] };
 var filter = '';
 var meView = '', meFilter = '', meAllMatches = false;
+var logOpen = {}; // 履歴タブの日ごとの開閉（日付 → 開いているか）
 var adminKey = '';
 var startOpts = { scoring: 'throws', use_order: true, first_team: null }; // 標準は1投ごとの記録（個人の投擲順あり）。結果だけ入力は予備
 var startStep = 1; // 試合開始: 1=メンバーを選ぶ、2=投擲順と先攻を決める（設計書 18.2）
@@ -1272,12 +1279,19 @@ function viewLog() {
   list = list.slice(0, 200);
   var cnt = {};
   list.forEach(function (m) { var k = dayKey(m.started_at); cnt[k] = (cnt[k] || 0) + 1; });
+  // 日の見出しをタップで開閉。最初は一番新しい日だけ開く（開閉はこの画面を開いている間だけ覚える）
   var prev = null;
-  list.forEach(function (m) {
+  list.forEach(function (m, i) {
     var k = dayKey(m.started_at);
-    if (k !== prev) { h += '<div class="logday"><b>' + esc(dayLabel(m.started_at)) + '</b><span class="muted">' + cnt[k] + '試合</span></div>'; prev = k; }
+    if (k !== prev) {
+      if (prev !== null) h += '</details>';
+      var open = logOpen.hasOwnProperty(k) ? logOpen[k] : i === 0;
+      h += '<details class="logdays" data-logday="' + esc(k) + '"' + (open ? ' open' : '') + '><summary class="logday"><b>' + esc(dayLabel(m.started_at)) + '</b><span class="muted">' + cnt[k] + '試合</span></summary>';
+      prev = k;
+    }
     h += histCard(m);
   });
+  if (prev !== null) h += '</details>';
   return h + '</div>';
 }
 
@@ -1982,6 +1996,7 @@ document.getElementById('reloadBtn').addEventListener('click', function () {
 });
 document.getElementById('adminBtn').addEventListener('click', function () { if (tab === 'sched') schLeave(); scoreView = null; tab = 'admin'; render(); window.scrollTo(0, 0); });
 document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; closeWatch(); if (tab === 'sched' && b.dataset.tab !== 'sched') schLeave(); if (tab !== 'sched' && b.dataset.tab === 'sched') schEnter(); schOpen = schForm = schBulk = null; tab = b.dataset.tab; render(); } });
+document.getElementById('main').addEventListener('toggle', function (e) { var d = e.target.dataset && e.target.dataset.logday; if (d) logOpen[d] = e.target.open; }, true);
 document.getElementById('main').addEventListener('toggle', function (e) { var k = e.target.dataset && e.target.dataset.sec; if (k) store('kamo_sec_' + k, e.target.open ? '1' : '0'); }, true);
 document.getElementById('main').addEventListener('input', function (e) { if (e.target.id === 'meFilter') { meFilter = e.target.value; var p0 = e.target.selectionStart; render(); var f0 = document.getElementById('meFilter'); f0.focus(); f0.setSelectionRange(p0, p0); return; } if (e.target.id === 'filter') { filter = e.target.value; var pos = e.target.selectionStart; render(); var f = document.getElementById('filter'); f.focus(); f.setSelectionRange(pos, pos); } });
 document.getElementById('main').addEventListener('change', function (e) { if (e.target.id === 'meView') { meView = e.target.value; meAllMatches = false; store('kamo_view', meView); render(); } });
