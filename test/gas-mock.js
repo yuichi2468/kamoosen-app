@@ -5,13 +5,15 @@ const path = require('path');
 
 function makeSheet(name) {
   const data = [];
+  let filter = null; // フィルタ（範囲だけ覚える）
   const width = () => data.reduce((w, r) => Math.max(w, r.length), 0);
   const ensure = (r, c) => { while (data.length < r) data.push([]); for (let i = 0; i < r; i++) while (data[i].length < c) data[i].push(''); };
   const range = (r, c, nr, nc) => ({
     getValues() { const out = []; for (let i = 0; i < nr; i++) { const row = []; for (let j = 0; j < nc; j++) row.push(data[r - 1 + i] && data[r - 1 + i][c - 1 + j] !== undefined ? data[r - 1 + i][c - 1 + j] : ''); out.push(row); } return out; },
     setValues(v) { ensure(r + v.length - 1, c + v[0].length - 1); v.forEach((row, i) => row.forEach((x, j) => { data[r - 1 + i][c - 1 + j] = x; })); return this; },
     setValue(x) { ensure(r, c); data[r - 1][c - 1] = x; return this; },
-    setFontWeight() { return this; }, setNumberFormat() { return this; }, setNote() { return this; }
+    setFontWeight() { return this; },
+    createFilter() { if (filter) throw new Error('フィルタはすでにあります'); filter = { range: [r, c, nr, nc], remove() { filter = null; } }; return filter; }, setNumberFormat() { return this; }, setNote() { return this; }
   });
   return {
     name, data,
@@ -23,7 +25,8 @@ function makeSheet(name) {
     getDataRange() { const lr = this.getLastRow(); return range(1, 1, Math.max(lr, 0), width()); },
     appendRow(row) { const r = this.getLastRow() + 1; ensure(r, row.length); row.forEach((x, j) => { data[r - 1][j] = x; }); },
     clearContents() { data.length = 0; },
-    setFrozenRows() {}
+    setFrozenRows() {}, setFrozenColumns() {},
+    getFilter() { return filter; }
   };
 }
 

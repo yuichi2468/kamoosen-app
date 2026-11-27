@@ -549,6 +549,11 @@ t('開始 → 投擲の送信 → 2本目の順番 → 自動で結果登録・�
   const p2 = r.data.throw_stats.p2, p1 = r.data.throw_stats.p1;
   // 1本目 p1,p2,p1,p2,p1 (12,12,12,12,2) / 2本目は p2 から: p2,p1,p2,p1,p2 (12,12,12,12,2)
   eq([p1.throws, p1.points, p1.wins, p2.throws, p2.wins], [5, 50, 1, 5, 1]);
+  { // stats シートの投擲成績（ヒット率は割合で入れる）
+    const H = g.HEADERS.stats, row = sh.stats.data.find(x => x[1] === '選手0');
+    eq([row[H.indexOf('ヒット率')], row[H.indexOf('投擲数')], row[H.indexOf('上がり')]], [p1.hit_rate / 100, 5, 1]);
+    const p3 = sh.stats.data.find(x => x[1] === '選手2');
+    eq(p3[H.indexOf('個人戦のヒット率')], ''); } // チーム戦なので個人戦の成績は空欄
   // 運営が無効化すると個人成績から外れる
   r = g.api('adminVoid', { admin_key: 'change-me', match_id: mid }); eq(r.ok, true, r.error);
   assert.strictEqual(r.data.throw_stats.p1, undefined);
@@ -612,6 +617,91 @@ t('Code.gs と index.html の点数計算は同じコード', () => {
   const b = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8').match(re)[0];
   eq(a === b, true);
 });
+
+console.log('■ 全員のスタッツ（stats シート）');
+{
+  const col = (g, name) => g.HEADERS.stats.indexOf(name);
+  const statsGas = () => {
+    const g = loadGas();
+    g.setup();
+    const sh = g.__sheets;
+    sh.players.appendRow(['A', '王者', '', 1800, true]);
+    sh.players.appendRow(['p1', 'あ', '', '', true]);
+    sh.players.appendRow(['p2', 'い', 1550, '', true]);
+    sh.players.appendRow(['p3', 'う', '', '', true]);
+    sh.players.appendRow(['p4', 'え', '', '', true]);
+    const play = (t1, t2, l1, l2, s1, s2) => {
+      let r = g.api('start', { team1: t1, team2: t2 }); eq(r.ok, true, r.error);
+      g.__advance(10 * 60000);
+      r = g.api('result', { match_id: r.data.matches[0].id, team1_legs: l1, team2_legs: l2, team1_score: s1, team2_score: s2 }); eq(r.ok, true, r.error);
+      g.__advance(10 * 60000);
+      return r;
+    };
+    play(['p1'], ['p2'], 2, 1, 95, 80);       // あ勝ち（個人戦）
+    play(['p1', 'p3'], ['p2', 'A'], 2, 0, 100, 40); // あ・う勝ち（チーム戦）
+    play(['p1'], ['p3'], 0, 2, 30, 100);      // あ負け
+    play(['p4'], ['p2'], 2, 0, 100, 20);      // あとで不参加にする人の試合
+    sh.players.data[5][4] = false;
+    g.recalc();
+    return g;
+  };
+  t('setup と結果の登録で stats シートが2段の見出しで書かれる', () => {
+    const g = statsGas(), d = g.__sheets.stats.data;
+    eq(d[0][0], '基本'); eq(d[0][col(g, '試合数')], '試合');
+    eq(d[1].slice(0, g.HEADERS.stats.length), JSON.parse(JSON.stringify(g.HEADERS.stats)));
+    eq(g.STATS_GROUPS.reduce((n, x) => n + x[1], 0), g.HEADERS.stats.length);
+    eq(d.length, 2 + 3 + 1 + 1); // 見出し2行 + 予選3人 + 王者 + 不参加（試合あり）
+    assert(g.__sheets.stats.getFilter(), 'フィルタがない');
+  });
+  t('個人ページと同じ数字（勝率・個人戦/チーム戦・連勝・1セット平均・レートの最高最低）', () => {
+    const g = statsGas(), d = g.__sheets.stats.data;
+    const st = g.api('state').data, pf = st.profiles.p1, me = st.players.find(p => p.id === 'p1');
+    const row = d.find(r => r[col(g, '名前')] === 'あ');
+    const v = name => row[col(g, name)];
+    eq([v('試合数'), v('勝利'), v('敗北')], [3, 2, 1]);
+    eq(v('勝率'), Math.round(2 / 3 * 10000) / 10000);
+    eq([v('個人戦'), v('個人戦の勝利'), v('個人戦の勝率'), v('チーム戦'), v('チーム戦の勝利'), v('チーム戦の勝率')], [2, 1, 0.5, 1, 1, 1]);
+    eq([v('最長連勝'), v('現在の連勝'), v('1セット平均'), v('平均のセット数')], [pf.best, '', pf.avg, pf.sets]);
+    eq(v('レート'), me.rating);
+    const hist = st.history.p1, pts = [1500].concat(hist.map(x => x.rating));
+    eq([v('開始レート'), v('最高レート'), v('最低レート'), v('増減')], [1500, Math.max(...pts), Math.min(...pts), me.rating - 1500]);
+    eq([v('2-0勝'), v('2-1勝'), v('1-2敗'), v('0-2敗')], [0, 1, 0, 1]);
+    eq(v('組んだ人数'), 1); eq(v('戦った相手'), 2);
+    eq(v('最低条件'), 'あと12試合（うちチーム戦4）');
+    assert(String(v('順位')).startsWith('暫定'));
+    eq(v('個人戦のヒット率'), ''); eq(v('ヒット率'), ''); // 1投ごとの記録がないので空欄
+  });
+  t('8位との差は ranking の qualify_count 位の合計との差（足りなければ空欄）', () => {
+    const g = statsGas();
+    let d = g.__sheets.stats.data;
+    assert(d.slice(2, 5).every(r => r[col(g, '8位との差')] === '')); // 3人しかいない
+    g.__sheets.settings.appendRow(['qualify_count', 2, '']);
+    g.recalc();
+    d = g.__sheets.stats.data;
+    const rk = g.__sheets.ranking.data.slice(1), second = rk[1][5];
+    d.slice(2, 5).forEach((r, i) => eq(r[col(g, '8位との差')], rk[i][5] - second));
+  });
+  t('鴨王は下に「王者」、参考レートと参考合計を出し、順位・合計・増減は空欄。不参加の人は「不参加」', () => {
+    const g = statsGas(), d = g.__sheets.stats.data, st = g.api('state').data;
+    const a = d.find(r => r[col(g, '名前')] === '王者'), x = d.find(r => r[col(g, '名前')] === 'え');
+    const A = st.players.find(p => p.id === 'A');
+    eq(a[0], '王者'); eq(a[col(g, 'レート')], 1800);
+    eq([a[col(g, '合計')], a[col(g, '8位との差')], a[col(g, '開始レート')], a[col(g, '増減')]], ['', '', '', '']);
+    eq(a[col(g, '参考レート')], A.virtual_rating);
+    eq(a[col(g, '参考合計')], A.virtual_total.total);
+    assert(a[col(g, '最低条件')].startsWith('（参考合計）あと'));
+    eq(a[col(g, '試合数')], 1);
+    eq(x[0], '不参加'); eq(x[col(g, '試合数')], 1); eq(x[col(g, '参考レート')], '');
+    eq(d.indexOf(a), 5); eq(d.indexOf(x), 6);
+  });
+  t('参考レートを非表示にしていても stats シートには出す', () => {
+    const g = statsGas();
+    g.api('adminSetting', { admin_key: 'change-me', key: 'virtual_rating_visible', value: false });
+    g.recalc();
+    const a = g.__sheets.stats.data.find(r => r[1] === '王者');
+    assert(typeof a[g.HEADERS.stats.indexOf('参考レート')] === 'number');
+  });
+}
 
 console.log('■ 画面に返す値（google.script.run で渡せる形か）');
 // google.script.run は Date・NaN などを含むと null を返す。返り値にそれらが無いことを確かめる

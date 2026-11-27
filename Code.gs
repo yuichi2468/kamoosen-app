@@ -21,7 +21,8 @@ var SHEET = {
   player_stats: 'player_stats',
   awards: 'awards',
   extra_bonus: 'extra_bonus',
-  schedule: 'schedule'
+  schedule: 'schedule',
+  stats: 'stats'
 };
 
 var HEADERS = {
@@ -43,8 +44,23 @@ var HEADERS = {
                  'singles_throws', 'singles_hits', 'singles_hit_rate', 'lose_avg', 'lose_sets', 'updated_at'],
   awards: ['award', 'rank', 'player_id', 'name', 'value', 'detail', 'updated_at'],
   extra_bonus: ['player_id', 'name', 'wins', 'wins_pt', 'partners', 'partners_pt', 'opponents', 'opponents_pt', 'rookie_pt', 'total', 'applied', 'updated_at'],
-  schedule: ['player_id', 'date', 'hour', 'place', 'place_other', 'format', 'comment', 'created_at', 'updated_at', 'device', 'gear', 'via']
+  schedule: ['player_id', 'date', 'hour', 'place', 'place_other', 'format', 'comment', 'created_at', 'updated_at', 'device', 'gear', 'via'],
+  // 全員のスタッツ（見るだけの表。1行目にグループ名、2行目に項目名を出す。全員のスタッツ 設計書）
+  stats: ['順位', '名前', '合計', '8位との差', 'レート', 'ボーナス', '最低条件', '通過圏',
+          '試合数', '勝利', '敗北', '勝率', '個人戦', '個人戦の勝利', '個人戦の勝率', 'チーム戦', 'チーム戦の勝利', 'チーム戦の勝率',
+          '最長連勝', '現在の連勝', '1セット平均', '平均のセット数',
+          '開始レート', '最高レート', '最低レート', '増減',
+          '勝利数ボーナス', '組んだ人数', '組んだ人数ボーナス', '戦った相手', '戦った相手ボーナス', 'ハンデ',
+          '2-0勝', '2-1勝', '1-2敗', '0-2敗', '個人戦のヒット率', '個人戦の投擲数', '平均ブレイク本数', '平均上がりターン数',
+          '上がれなかったセットの平均得点', '先攻セット取得率', '後攻セット取得率',
+          'ヒット率', '投擲数', '上がり', 'バースト',
+          '参考レート', '参考合計', '更新日時']
 };
+
+/** stats シートの1行目（グループ名）。グループの最初の列に名前を出す */
+var STATS_GROUPS = [['基本', 8], ['試合', 14], ['レート', 4], ['ボーナスの内訳', 6], ['個人戦の成績', 11], ['投擲成績（チーム戦も含む）', 4], ['鴨王（レート固定の人）', 2], ['', 1]];
+/** stats シートで「58.3%」の形にする列（値は 0.583 のような割合） */
+var STATS_PCT = ['勝率', '個人戦の勝率', 'チーム戦の勝率', '個人戦のヒット率', '先攻セット取得率', '後攻セット取得率', 'ヒット率'];
 
 var DEFAULT_SETTINGS = [
   ['start_at', '2026-11-24T07:00:00+09:00', '予選の開始日時（この時刻より前は試合開始できない）'],
@@ -432,6 +448,88 @@ function computeVirtualTotals(res, bonusMap, cfg) {
     out[id] = { virtual_rating: v, bonus: b, total: v + b, matches: n, min: min, eligible: n >= min };
   });
   return out;
+}
+
+/**
+ * 全員のスタッツの表（stats シート）の行を作る（全員のスタッツ 設計書）。数字はアプリの個人ページと同じ計算から出す。
+ * 並び: ランキング順 → レート固定の人（鴨王）→ 不参加で試合の記録がある人。値は HEADERS.stats の順の配列
+ * throwStats は computeThrowStats の結果（投擲成績）。now は更新日時
+ */
+function buildStatsRows(players, matches, res, ranking, extra, bonusMap, throwStats, cfg, now) {
+  cfg = cfg || {}; extra = extra || {}; bonusMap = bonusMap || {}; throwStats = throwStats || {};
+  var minM = num_(cfg.min_matches, 15), minT = num_(cfg.min_team_matches, 5), q = num_(cfg.qualify_count, 8);
+  var profiles = computeProfiles(players, matches), singles = computeSinglesStats(matches);
+  var vTotals = computeVirtualTotals(res, bonusMap, cfg);
+  var line = ranking.length >= q ? ranking[q - 1].total : null; // 8位（qualify_count 位）の合計。ランキングの太線と同じ位置
+  var blank = function (v) { return v === null || v === undefined || (typeof v === 'number' && !isFinite(v)) ? '' : v; };
+  var ratio = function (w, n0) { return n0 ? Math.round(w / n0 * 10000) / 10000 : ''; };
+  var pct = function (v) { return v === null || v === undefined || v === '' ? '' : Math.round(v * 10) / 1000; }; // 58.3 → 0.583
+  var need = function (n0, t0, mM, mT) {
+    var a = Math.max(0, mM - n0), b = Math.max(0, mT - t0);
+    if (!a && !b) return '達成';
+    if (!b) return 'あと' + a + '試合';
+    if (a <= b) return 'あとチーム戦' + b + '試合';
+    return 'あと' + a + '試合（うちチーム戦' + b + '）';
+  };
+  var rowOf = function (p, r, kind) {
+    var id = String(p.player_id), fixed = res.fixed[id] !== undefined;
+    var pf = profiles[id] || { s_w: 0, s_n: 0, t_w: 0, t_n: 0, wins: 0, losses: 0, matches: 0, avg: null, sets: 0, best: 0, cur: 0, w20: 0, w21: 0, l12: 0, l02: 0 };
+    var eb = extra[id], ss1 = singles[id] || {}, ts = throwStats[id], st = res.stats[id] || { matches: 0, team_matches: 0 };
+    var rating = res.ratings[id], hist = res.history[id] || [];
+    var start = hist.length ? hist[0].rating - hist[0].delta : rating;
+    var pts = [start].concat(hist.map(function (x) { return x.rating; }));
+    var vt = vTotals[id];
+    var head;
+    if (r) head = [r.eligible ? r.rank : '暫定' + r.rank, p.name, r.total, line === null ? '' : r.total - line, rating, r.bonus,
+                   need(st.matches, st.team_matches, minM, minT), r.qualify_zone ? '通過圏内' : (r.playoff ? 'プレーオフ' : '')];
+    else head = [kind, p.name, '', '', rating, '', fixed && vt ? '（参考合計）' + (vt.eligible ? '達成' : 'あと' + (vt.min - vt.matches) + '試合') : '', ''];
+    return head.concat([
+      pf.matches, pf.wins, pf.losses, ratio(pf.wins, pf.matches),
+      pf.s_n, pf.s_w, ratio(pf.s_w, pf.s_n), pf.t_n, pf.t_w, ratio(pf.t_w, pf.t_n),
+      pf.best, pf.cur || '', blank(pf.avg), pf.avg === null ? '' : pf.sets,
+      fixed ? '' : start, fixed ? '' : Math.max.apply(null, pts), fixed ? '' : Math.min.apply(null, pts), fixed ? '' : rating - start,
+      eb ? eb.wins_pt : '', eb ? eb.partners : '', eb ? eb.partners_pt : '', eb ? eb.opponents : '', eb ? eb.opponents_pt : '', eb ? eb.rookie_pt : '',
+      pf.w20, pf.w21, pf.l12, pf.l02,
+      pct(ss1.hit_rate), blank(ss1.throws), blank(ss1.break_avg), blank(ss1.finish_turns_avg), blank(ss1.lose_avg), pct(ss1.first_rate), pct(ss1.second_rate),
+      ts && ts.throws ? pct(ts.hit_rate) : '', ts ? ts.throws : '', ts ? ts.wins : '', ts ? ts.busts : '',
+      fixed ? blank(res.virtual[id]) : '', fixed && vt ? vt.total : '',
+      now
+    ]);
+  };
+  var byId = {};
+  players.forEach(function (p) { byId[String(p.player_id)] = p; });
+  var out = ranking.map(function (r) { return rowOf(byId[r.player_id], r); });
+  var inRank = {};
+  ranking.forEach(function (r) { inRank[r.player_id] = true; });
+  players.forEach(function (p) { var id = String(p.player_id); if (res.fixed[id] !== undefined) out.push(rowOf(p, null, '王者')); });
+  players.forEach(function (p) {
+    var id = String(p.player_id);
+    if (inRank[id] || res.fixed[id] !== undefined || !((res.stats[id] || {}).matches > 0)) return;
+    out.push(rowOf(p, null, '不参加'));
+  });
+  return out;
+}
+
+/** stats シートを書き直す。シートがなければ作る。見た目の設定に失敗しても再計算は止めない */
+function writeStatsSheet_(rows) {
+  var ss = ss_(), sh = ss.getSheetByName(SHEET.stats) || ss.insertSheet(SHEET.stats);
+  var head = HEADERS.stats, w = head.length, g = [];
+  STATS_GROUPS.forEach(function (x) { for (var i = 0; i < x[1]; i++) g.push(i === 0 ? x[0] : ''); });
+  var out = [g, head].concat(rows);
+  sh.clearContents();
+  sh.getRange(1, 1, out.length, w).setValues(out);
+  try {
+    sh.getRange(1, 1, 2, w).setFontWeight('bold');
+    sh.setFrozenRows(2);
+    sh.setFrozenColumns(2);
+    if (rows.length) {
+      STATS_PCT.forEach(function (name) { sh.getRange(3, head.indexOf(name) + 1, rows.length, 1).setNumberFormat('0.0%'); });
+      sh.getRange(3, w, rows.length, 1).setNumberFormat('yyyy/mm/dd hh:mm:ss');
+    }
+    var f = sh.getFilter();
+    if (f) f.remove();
+    sh.getRange(2, 1, out.length - 1, w).createFilter();
+  } catch (e) { /* 見た目だけなので無視 */ }
 }
 
 /** players シートの rookie 列（TRUE・○・1）で1回生を判定する */
@@ -950,6 +1048,14 @@ function recalc() {
     });
     psh.getRange(1, 1, pout.length, HEADERS.player_stats.length).setValues(pout);
   }
+  // 全員のスタッツ（stats シート。見るだけの表）
+  var tStats = ts || {};
+  if (!ts && tsh) {
+    var doneIds2 = {};
+    matches.forEach(function (m) { if (m.status === 'done') doneIds2[m.match_id] = true; });
+    tStats = computeThrowStats(readTable_(SHEET.throws), doneIds2);
+  }
+  writeStatsSheet_(buildStatsRows(players, matches, res, rows, extra, mergeBonus_(bonus, extra), tStats, cfg, now));
   // 追加ボーナス（extra_bonus シート）
   var esh = ss_().getSheetByName(SHEET.extra_bonus);
   if (esh) {
@@ -1623,6 +1729,7 @@ function setup() {
   var ss = ss_();
   Object.keys(SHEET).forEach(function (k) {
     var name = SHEET[k];
+    if (k === 'stats') return; // 見出しが2段なので、最後の recalc で作る
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
     if (sh.getLastRow() === 0) {
       sh.getRange(1, 1, 1, HEADERS[k].length).setValues([HEADERS[k]]).setFontWeight('bold');
