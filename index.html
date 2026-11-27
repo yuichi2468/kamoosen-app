@@ -387,7 +387,7 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .tpsec { font-size: 12px; color: var(--muted); font-weight: 700; margin: 6px 0 0; }
 @media (max-width: 480px) { .teams { grid-template-columns: 1fr; } .hide-sm { display: none; } }
 @media (max-width: 480px) { nav button { min-width: 0; padding: 12px 2px; font-size: 13px; } }
-.rule ul { margin: 0 0 6px; padding-left: 1.2em; } .rule li { margin: 4px 0; line-height: 1.6; } .rule p { line-height: 1.6; margin: 0 0 8px; }
+.rule .ruleh { font-size: 14px; margin: 10px 0 4px; } .rule ul { margin: 0 0 6px; padding-left: 1.2em; } .rule li { margin: 4px 0; line-height: 1.6; } .rule p { line-height: 1.6; margin: 0 0 8px; }
 .viewbanner { background: var(--card); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; padding: 6px 16px; text-align: center; }
 body.viewonly header h1 { padding-right: 60px; }
 body.viewonly .reloadbtn { right: 12px; }
@@ -899,12 +899,6 @@ function viewRule() {
   var sec = function (title, body) { return '<div class="card rule"><h2>' + title + '</h2>' + body + '</div>'; };
   var h = sec('鴨王戦の予選', '<p>期間中（' + fmt(s.start_at) + ' 〜 ' + fmt(s.end_at) + '）に、参加者どうしが自由に組んで試合をし、結果をレートに反映する<b>フリー対戦制</b>のレート戦です。</p>' +
     '<p>期間が終わった時点で<b>合計（レート＋ボーナス）の上位' + q + '名</b>が、本戦の順位戦に進みます。</p>');
-  h += sec('モルックの基本', '<ul>' +
-    '<li>1〜12の数字が書かれた木のピン（スキットル）を、木の棒（モルック）を投げて倒します。</li>' +
-    '<li><b>1本だけ倒したら、そのピンの数字</b>が得点。<b>2本以上倒したら、倒した本数</b>が得点です。</li>' +
-    '<li>倒れたピンは、倒れた場所で立て直して続けます（だんだん散らばっていきます）。</li>' +
-    '<li><b>ちょうど50点</b>にしたチームがセットを取ります。<b>50点を超えると25点に戻ります</b>（バースト）。</li>' +
-    '<li>1本も倒せないとミス。チームで<b>3回続けてミスすると失格</b>で、そのセットは相手が取ります。</li></ul>');
   h += sec('試合の形', '<ul>' +
     '<li>すべて<b>2チームの対戦</b>で、各チーム1〜' + maxTeam + '人（1対1、2対2、1対3 なども自由）。1対1を「個人戦」、それ以外を「チーム戦」と呼びます。</li>' +
     '<li><b>2セット先取</b>で勝ち。チームの中では順番に1人ずつ投げます。</li>' +
@@ -924,7 +918,17 @@ function viewRule() {
     '<li>個人戦で戦った相手の人数: ' + esc(tiers(s.bonus_opponent_tiers, '5:5,10:15,20:35,30:55,all:100')) + '</li>' +
     (rookiePt ? '<li>1回生: +' + rookiePt + '（ハンデ）</li>' : '') + '</ul>' +
     '<p class="muted">人数の区分は、到達したいちばん上の区分のポイントだけがもらえます。</p>');
-  if (boss.length) h += sec('鴨王（前回王者）', '<p>' + boss.map(function (p) { return esc(p.name); }).join('・') + 'は予選免除で、レートは<b>' + boss[0].rating + 'に固定</b>したまま対戦に参加します（レイドバトル）。鴨王に勝つと大きくレートが上がります。予選の順位には入りません。</p>');
+  if (boss.length) {
+    var bn = boss.map(function (p) { return esc(p.name); }).join('・'), fixedR = boss[0].rating;
+    var vStart = s.virtual_initial_rating !== undefined && s.virtual_initial_rating !== null && s.virtual_initial_rating !== '' ? s.virtual_initial_rating : fixedR;
+    var bh = '<p>鴨王（' + bn + '）は予選免除で、レートは<b>' + fixedR + 'に固定</b>したまま対戦に参加します（レイドバトル）。鴨王に勝つと大きくレートが上がります。鴨王は予選の順位には入りません。</p>';
+    if (s.virtual_rating_visible) bh += '<h3 class="ruleh">参考レート</h3><ul>' +
+      '<li>鴨王が<b>ほかの人と同じように変動したら</b>いくつになるかを、「参考レート」として計算しています（' + vStart + 'から、同じ式で増減）。</li>' +
+      '<li>参考レートにボーナスを足したものが<b>参考合計</b>です。' + n(s.virtual_min_matches, minM) + '試合に届くまでは「暫定」と表示します。</li>' +
+      '<li>鴨王の公式のレートは固定のままで、参考レート・参考合計は順位や特別賞には使いません。ランキングのレイドバトル欄、個人ページ、対戦履歴（「参考」の増減）で見られます。</li>' +
+      '<li>例外として、鴨王が<b>ほかの人と組んだチーム</b>は、鴨王を参考レートとしてチームの平均を出し、味方・相手のレートの増減を計算します（鴨王が1人のチームは' + fixedR + 'で計算）。</li></ul>';
+    h += sec('鴨王（前回王者）', bh);
+  }
   h += sec('特別賞', '<p>MVP賞（勝率）、連勝王、ジャイキリ賞（格上に勝った最大のレート差）、平均得点王、ルーキー賞などがあり、「特別賞」タブで今の順位を見られます。</p>');
   return h;
 }
