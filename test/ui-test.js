@@ -502,7 +502,7 @@ const server = http.createServer((req, res) => {
     await vp.waitForSelector('.rule');
     { const rt = await vp.textContent('#main');
       if (rt.includes('モルックの基本')) throw new Error('ルールタブにモルックの基本が残っている');
-      for (const w of ['参考レート', '参考合計', '最低15試合', 'チーム戦5試合以上', '上位8名', '5人 +5', '全員 +100', '1800に固定']) if (!rt.includes(w)) throw new Error('ルールタブに「' + w + '」がない'); }
+      for (const w of ['参考レート', '参考合計', '順位戦の投げ順', '最低15試合', 'チーム戦5試合以上', '上位8名', '5人 +5', '全員 +100', '1800に固定']) if (!rt.includes(w)) throw new Error('ルールタブに「' + w + '」がない'); }
     await vp.screenshot({ path: path.join(out, '33_view_rule.png'), fullPage: true });
     // 試合タブ: 上に試合中、その下に履歴。1投ごとに記録した試合のスコア表が開く
     await vp.click('nav button[data-tab=live]');
