@@ -936,7 +936,7 @@ function viewRule() {
   h += sec('試合の形', '<ul>' +
     '<li>すべて<b>2チームの対戦</b>で、各チーム1〜' + maxTeam + '人（1対1、2対2、1対3 なども自由）。1対1を「個人戦」、それ以外を「チーム戦」と呼びます。</li>' +
     '<li><b>2セット先取</b>で勝ち。チームの中では順番に1人ずつ投げます。</li>' +
-    '<li>2セット目は1セット目の後攻チームが先攻で、チームの中の投げ順は1セット目の逆順が基本です。1-1 になったら、それまでの総得点の高いチームが3セット目の先攻・後攻を選びます。</li>' +
+    '<li>2セット目は1セット目の後攻チームが先攻。1-1 になったら、それまでの総得点の高いチームが3セット目の先攻・後攻を選びます。</li>' +
     '<li>試合はアプリで1投ごとに記録され、「試合」タブで試合中のスコア表を見られます。</li></ul>');
   h += sec('レートの計算', '<p>最初のレートは' + init + '（前回参加した人は前回の成績から補正）。試合のたびに、<b>チームの平均レート</b>どうしで増減を計算し、チームの全員に同じだけ反映します。</p>' +
     '<ul><li>勝ち: <b>+(' + wb + ' ＋ (相手の平均 − 自分の平均) × ' + wc + ')</b></li>' +
@@ -1165,7 +1165,7 @@ function setupView(m, loc, st) {
   if (m.use_order) {
     h += '<div class="teams">' + [1, 2].map(function (t) {
       var list = dr.o[t - 1];
-      return '<div class="team t' + t + '"><h3>チーム' + t + ' の投擲順' + (st.leg === 2 && list.length > 1 ? '<small class="muted">（最初は1セット目の逆順）</small>' : '') + '</h3><ul class="olist">' + list.map(function (id, i) {
+      return '<div class="team t' + t + '"><h3>チーム' + t + ' の投擲順' + '</h3><ul class="olist">' + list.map(function (id, i) {
         return '<li><span>' + (i + 1) + '. ' + esc(P(id).name) + '</span>' + (i > 0 ? '<button class="btn small ghost" data-dup="' + esc(id) + '" data-team="' + t + '">↑</button>' : '') + '</li>';
       }).join('') + '</ul></div>';
     }).join('') + '</div>';

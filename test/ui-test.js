@@ -71,7 +71,7 @@ const server = http.createServer((req, res) => {
     await page.click('#ruleBtn');
     await page.waitForSelector('.rule');
     { const rt = await page.textContent('#main');
-      for (const w of ['最低15試合', '上位8名', '1セット目の逆順']) if (!rt.includes(w)) throw new Error('ルールに「' + w + '」がない');
+      for (const w of ['最低15試合', '上位8名']) if (!rt.includes(w)) throw new Error('ルールに「' + w + '」がない');
       if (!(await page.$eval('#ruleBtn', b => b.classList.contains('on')))) throw new Error('ルールボタンが選択中にならない'); }
     await page.screenshot({ path: path.join(out, '1b_rule.png'), fullPage: true });
     await page.click('nav button[data-tab=rank]');
