@@ -153,7 +153,20 @@ const server = http.createServer((req, res) => {
   days = await page.$$eval('.logday', x => x.map(y => y.textContent));
   console.log('log days:', JSON.stringify(days));
   if (days.length !== 2 || !/2試合$/.test(days[1])) throw new Error('日付が変わったところで区切られない: ' + JSON.stringify(days));
+  // 日ごとの開閉: 最初は一番新しい日だけ開いている。見出しのタップで開閉し、描き直しても保たれる
+  const openDays = () => page.$$eval('details.logdays', x => x.map(y => y.open));
+  if (JSON.stringify(await openDays()) !== '[true,false]') throw new Error('最初に新しい日だけ開いていない: ' + JSON.stringify(await openDays()));
+  if (await page.isVisible('details.logdays:nth-of-type(2) .hm')) throw new Error('閉じた日の試合が見えている');
   await page.screenshot({ path: path.join(out, '5_log.png'), fullPage: true });
+  await page.click('details.logdays:nth-of-type(2) summary');
+  await page.waitForSelector('details.logdays:nth-of-type(2) .hm', { state: 'visible' });
+  await page.click('details.logdays:nth-of-type(1) summary');
+  await page.waitForTimeout(50);
+  await page.evaluate(() => render());
+  if (JSON.stringify(await openDays()) !== '[false,true]') throw new Error('開閉が描き直しで戻る: ' + JSON.stringify(await openDays()));
+  await page.screenshot({ path: path.join(out, '5a_log_toggle.png'), fullPage: true });
+  await page.click('details.logdays:nth-of-type(1) summary');
+  await page.waitForTimeout(50);
   await page.evaluate(() => { var d = S.matches.filter(m => m.status === 'done'); d[d.length - 1].started_at += 86400000; d[d.length - 2].started_at += 86400000; render(); });
   await page.setViewportSize({ width: 375, height: 667 });
   await page.screenshot({ path: path.join(out, '5b_log_375.png') });
@@ -486,6 +499,10 @@ const server = http.createServer((req, res) => {
     if (!/青木/.test(await vp.textContent('.heroname'))) throw new Error('観戦用ページで個人タブが開かない');
     // 履歴: 1投ごとに記録した試合のスコア表が開く
     await vp.click('nav button[data-tab=log]');
+    if (!(await vp.$eval('details.logdays', d => d.open))) throw new Error('観戦用ページの履歴で一番新しい日が開いていない');
+    await vp.click('details.logdays summary');
+    await vp.waitForFunction(() => !document.querySelector('details.logdays').open);
+    await vp.click('details.logdays summary');
     await vp.waitForSelector('[data-sct]');
     await vp.click('[data-sct]');
     await vp.waitForSelector('[data-scback]');
