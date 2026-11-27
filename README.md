@@ -42,6 +42,7 @@
 | min_gain / min_loss | 10 / 10 | 勝ち最低+10、負け最低−10 |
 | max_team_size | 4 | 1チームの最大人数 |
 | max_singles_vs_same | 3 | 同じ相手との1vs1の上限（Aも対象） |
+| max_vs_fixed_solo / max_vs_fixed_singles | 5 / 3 | 鴨王が1人のチーム（1vs1・鴨王1人vs複数＝1800で計算する試合）と対戦できる回数（1人あたり）／そのうち1vs1の上限。鴨王がほかの人と組んだ試合は数えない。シートに行が無ければこの値で動きます |
 | min_matches / min_team_matches | 15 / 5 | 参加条件 |
 | qualify_count | 8 | 通過人数 |
 | admin_key | change-me | **運営画面のパスワード。必ず変更してください** |

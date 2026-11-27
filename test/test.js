@@ -43,7 +43,7 @@ t('1vs3 平均で計算し全員に同額（人数補正なし）', () => {
   const r = G.computeRatings(ps, m, cfg);
   // 平均 1700 vs 1450、3人側勝ち: +24+250*0.06=39 / -(20+250*0.05)=-32.5→-33
   eq([r.ratings.x, r.ratings.a, r.ratings.b, r.ratings.c], [1667, 1539, 1489, 1439]);
-  eq(r.stats.a, { matches: 1, team_matches: 1, wins: 1, losses: 0 });
+  eq(r.stats.a, { matches: 1, team_matches: 1, wins: 1, losses: 0, solo_wins: 0, solo_losses: 0 });
 });
 t('A は1800固定で変動せず、相手は通常計算（1500がAに勝つと+42）', () => {
   const m = [{ match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'A', winner: 1, status: 'done' }];
@@ -147,6 +147,36 @@ t('同一相手の1vs1は3試合まで（Aも対象、チーム戦は対象外�
   assert.strictEqual(G.validateStart(['A', 'p3'], ['p1'], players, ms, scfg, now), null);
   ms[2].status = 'void';
   assert.strictEqual(G.validateStart(['A'], ['p1'], players, ms, scfg, now), null);
+});
+t('鴨王が1人のチームとの対戦は1人5試合まで、うち1vs1は3試合まで（鴨王と組む試合は無制限）', () => {
+  const cfg2 = Object.assign({}, scfg, { max_singles_vs_same: 10 });
+  const mk = (i, a, b, st) => ({ match_id: 'v' + i, started_at: i, team1_ids: a, team2_ids: b, winner: 1, status: st || 'done' });
+  // 1vs1 を3試合 → 4試合目の1vs1は不可、1人vs複数はできる
+  let ms = [1, 2, 3].map(i => mk(i, 'A', 'p1'));
+  assert(/1vs1/.test(G.validateStart(['A'], ['p1'], players, ms, cfg2, now)));
+  assert(/1vs1/.test(G.validateStart(['p1'], ['A'], players, ms, cfg2, now)));
+  assert.strictEqual(G.validateStart(['A'], ['p1', 'p3'], players, ms, cfg2, now), null);
+  // 1人vs複数を2試合足して合計5 → 鴨王1人の試合は不可、鴨王と組む試合・鴨王と別チームで鴨王に味方がいる試合はできる
+  ms = ms.concat([mk(4, 'A', 'p1,p3'), mk(5, 'p1,p4', 'A')]);
+  assert(/5試合/.test(G.validateStart(['A'], ['p1', 'p2'], players, ms, cfg2, now)));
+  assert.strictEqual(G.validateStart(['A', 'p1'], ['p2'], players, ms, cfg2, now), null);
+  assert.strictEqual(G.validateStart(['A', 'p2'], ['p1'], players, ms, cfg2, now), null);
+  // 数え方: p3 は1人vs複数で1、p4 も1。鴨王と組んだ試合・取り消しは数えない
+  const more = ms.concat([mk(6, 'A,p3', 'p4'), mk(7, 'A', 'p3', 'void'), mk(8, 'A', 'p3', 'playing')]);
+  const c = G.computeRatings(players, more, cfg2).vsFixed;
+  eq(c.p1, { solo: 5, singles: 3 }); eq(c.p3, { solo: 2, singles: 1 }); eq(c.p4, { solo: 1, singles: 0 });
+  assert.strictEqual(c.A, undefined);
+  // 取り消した試合は数えないので、1つ取り消せばまた始められる
+  ms[4].status = 'void';
+  assert.strictEqual(G.validateStart(['A'], ['p1', 'p2'], players, ms, cfg2, now), null);
+  // 上限は settings で変えられる
+  assert.strictEqual(G.validateStart(['A'], ['p1'], players, [1, 2, 3].map(i => mk(i, 'A', 'p1')), Object.assign({}, cfg2, { max_vs_fixed_singles: 4 }), now), null);
+});
+t('鴨王の勝敗を「1人で戦った試合」と「組んだチーム戦」に分けて数える', () => {
+  const mk = (i, a, b, w) => ({ match_id: 'w' + i, started_at: i, team1_ids: a, team2_ids: b, winner: w, status: 'done' });
+  const r = G.computeRatings(players, [mk(1, 'A', 'p1', 1), mk(2, 'A', 'p1,p2', 2), mk(3, 'A,p3', 'p4', 1), mk(4, 'A,p3', 'p4', 2), mk(5, 'p4', 'A,p2', 1)], cfg);
+  const st = r.stats.A;
+  eq([st.wins, st.losses, st.solo_wins, st.solo_losses], [2, 3, 1, 1]);
 });
 t('試合中の人は新しい試合を始められない', () => {
   const ms = [{ match_id: 'm1', started_at: 1, team1_ids: 'p1', team2_ids: 'p3', status: 'playing' }];

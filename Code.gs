@@ -75,6 +75,8 @@ var DEFAULT_SETTINGS = [
   ['min_loss', 10, '負けの最低減分'],
   ['max_team_size', 4, '1チームの最大人数'],
   ['max_singles_vs_same', 3, '同一選手との1vs1の上限'],
+  ['max_vs_fixed_solo', 5, '鴨王が1人のチーム（1vs1・鴨王1人vs複数。鴨王を固定レートで計算する試合）と対戦できる回数（1人あたり。鴨王がほかの人と組んだ試合は数えない）'],
+  ['max_vs_fixed_singles', 3, 'そのうち鴨王との1vs1（個人戦）の上限（1人あたり）'],
   ['min_matches', 15, '参加条件: 最低試合数'],
   ['min_team_matches', 5, '参加条件: 最低チーム戦数'],
   ['qualify_count', 8, '順位戦に進む人数'],
@@ -173,7 +175,7 @@ function computeRatings(players, matches, cfg) {
     if (fr !== '' && fr !== null && fr !== undefined && !isNaN(Number(fr))) fixed[id] = Number(fr);
     ratings[id] = fixed[id] !== undefined ? fixed[id] : num_(p.initial_rating, base);
     if (fixed[id] !== undefined) { virtual[id] = vStart !== null ? vStart : fixed[id]; virtualHistory[id] = []; }
-    stats[id] = { matches: 0, team_matches: 0, wins: 0, losses: 0 };
+    stats[id] = { matches: 0, team_matches: 0, wins: 0, losses: 0, solo_wins: 0, solo_losses: 0 }; // solo_*: 自分が1人のチームで出た試合（1vs1・1人vs複数）
     history[id] = [];
   });
 
@@ -221,6 +223,7 @@ function computeRatings(players, matches, cfg) {
         stats[id].matches++;
         if (isTeam) stats[id].team_matches++;
         if (won) stats[id].wins++; else stats[id].losses++;
+        if (team.length === 1) { if (won) stats[id].solo_wins++; else stats[id].solo_losses++; }
         history[id].push({ match_id: m.match_id, at: toTime_(m.started_at), delta: fixed[id] === undefined ? delta : 0, rating: ratings[id] });
       });
     };
@@ -241,7 +244,41 @@ function computeRatings(players, matches, cfg) {
   });
 
   return { ratings: ratings, fixed: fixed, stats: stats, deltas: deltas, history: history, singlesCount: singlesCount,
-           virtual: virtual, virtualHistory: virtualHistory };
+           virtual: virtual, virtualHistory: virtualHistory, vsFixed: countVsFixed_(players, matches) };
+}
+
+/** players の中のレート固定の人（鴨王）の ID の集合 */
+function fixedSet_(players) {
+  var f = {};
+  players.forEach(function (p) {
+    var fr = p.fixed_rating;
+    if (fr !== '' && fr !== null && fr !== undefined && !isNaN(Number(fr))) f[String(p.player_id)] = true;
+  });
+  return f;
+}
+
+/**
+ * 鴨王が1人のチーム（1vs1・鴨王1人vs複数 ＝ 鴨王を固定レートで計算する試合）と対戦した回数を、相手側の選手ごとに数える。
+ * 取り消し（void）以外を数える（試合中も数える）。鴨王がほかの人と組んだ試合は数えない。
+ * 戻り値: { 選手ID: { solo: 合計, singles: うち1vs1 } }
+ */
+function countVsFixed_(players, matches) {
+  var f = fixedSet_(players), out = {};
+  matches.forEach(function (m) {
+    if (m.status === 'void') return;
+    var t1 = parseIds_(m.team1_ids), t2 = parseIds_(m.team2_ids);
+    [[t1, t2], [t2, t1]].forEach(function (x) {
+      var me = x[0], opp = x[1];
+      if (!(me.length === 1 && f[me[0]])) return;
+      opp.forEach(function (id) {
+        if (f[id]) return;
+        var c = out[id] || (out[id] = { solo: 0, singles: 0 });
+        c.solo++;
+        if (opp.length === 1) c.singles++;
+      });
+    });
+  });
+  return out;
 }
 
 /**
@@ -746,6 +783,21 @@ function validateStart(team1, team2, players, matches, cfg, now) {
       if (a.length === 1 && b.length === 1 && pairKey_(a[0], b[0]) === key) cnt++;
     });
     if (cnt >= maxSingles) return 'この2人の1vs1はすでに' + maxSingles + '試合行っています';
+  }
+  // 鴨王が1人のチーム（固定レートで計算する試合）との対戦は1人あたり max_vs_fixed_solo 試合まで、うち1vs1は max_vs_fixed_singles 試合まで
+  var fx = fixedSet_(players), maxSolo = num_(cfg.max_vs_fixed_solo, 5), maxFS = num_(cfg.max_vs_fixed_singles, 3);
+  var vsF = null;
+  var pairs = [[team1, team2], [team2, team1]];
+  for (var q = 0; q < pairs.length; q++) {
+    var me = pairs[q][0], opp = pairs[q][1];
+    if (!(me.length === 1 && fx[me[0]])) continue;
+    vsF = vsF || countVsFixed_(players, matches);
+    for (var r = 0; r < opp.length; r++) {
+      if (fx[opp[r]]) continue;
+      var c = vsF[opp[r]] || { solo: 0, singles: 0 }, nm = byId[opp[r]].name;
+      if (c.solo >= maxSolo) return nm + ' さんは鴨王が1人のチームとの対戦（1vs1・鴨王1人vs複数）がすでに' + maxSolo + '試合です（鴨王がほかの人と組む試合はできます）';
+      if (opp.length === 1 && c.singles >= maxFS) return nm + ' さんは鴨王との1vs1がすでに' + maxFS + '試合です（鴨王1人vs複数、鴨王がほかの人と組む試合はできます）';
+    }
   }
   return null;
 }
@@ -1330,7 +1382,7 @@ function publicState_() {
   var ranking = buildRanking(players, res, bonusMap, cfg);
   var pubCfg = {};
   ['start_at', 'end_at', 'result_deadline', 'initial_rating', 'win_base', 'win_coef', 'loss_base', 'loss_coef',
-   'min_gain', 'min_loss', 'max_team_size', 'max_singles_vs_same', 'min_matches', 'min_team_matches',
+   'min_gain', 'min_loss', 'max_team_size', 'max_singles_vs_same', 'max_vs_fixed_solo', 'max_vs_fixed_singles', 'min_matches', 'min_team_matches',
    'qualify_count', 'virtual_rating_visible',
    'bonus_wins_step', 'bonus_wins_pt', 'bonus_partner_tiers', 'bonus_opponent_tiers', 'bonus_rookie_pt'].forEach(function (k) { // bonus_* は観戦用ページのルールタブで使う
     var v = cfg[k];
@@ -1378,7 +1430,8 @@ function publicState_() {
     awards: awardsVisible_(cfg) ? computeAwards(players, matches, res, ranking, cfg) : null,
     history: res.history,
     virtual_history: showVirtual ? res.virtualHistory : {},
-    singles: res.singlesCount
+    singles: res.singlesCount,
+    vs_fixed: res.vsFixed // 鴨王が1人のチームと対戦した回数（選手ごと。{solo, singles}）
   };
 }
 
