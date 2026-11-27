@@ -178,6 +178,7 @@ node test/test.js          # レート計算・1投ごとの点数計算・入�
 node test/build.js         # engine.js を直したとき、Code.gs と index.html に反映する
 node test/ui-test.js       # 画面をブラウザで操作して確認（Playwright が必要）
 node test/sched-ui-test.js # 日程タブをブラウザで操作して確認（Playwright が必要）
+node test/rank-filter-test.js # レート推移の日ごとの増減・絞り込みの入力・ランキングの並び替え（Playwright が必要）
 ```
 
 ## よくある質問
