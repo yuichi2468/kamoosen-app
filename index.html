@@ -653,7 +653,10 @@ function viewRank() {
   h += '</tbody></table></div>';
   h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。太線より上が上位' + q + '名です（最低条件を満たしていない人も含みます）。色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
-  if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + p.stats.matches + '試合 ' + p.stats.wins + '勝' + p.stats.losses + '敗' +
+  if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { var st = p.stats, sw = st.solo_wins || 0, sl = st.solo_losses || 0;
+    return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + st.matches + '試合 ' + st.wins + '勝' + st.losses + '敗' +
+    '<br><span class="muted">鴨王1人で戦った試合（1vs1・1人vs複数）: </span>' + sw + '勝' + sl + '敗' +
+    '<br><span class="muted">ほかの人と組んだチーム戦: </span>' + (st.wins - sw) + '勝' + (st.losses - sl) + '敗' +
     (p.virtual_rating !== undefined && p.virtual_rating !== null ? '<br><span class="muted">変動した場合のレート（参考）: ' + p.virtual_rating + '</span>' : '') +
     (p.virtual_total ? '<br><span class="muted">参考合計（参考レート＋ボーナス）: </span><b>' + p.virtual_total.total + '</b> ' + vtBadge(p.virtual_total) : '') + '</p>'; }).join('') + '</div>';
   return h;
@@ -766,7 +769,7 @@ function viewPlay() {
   h += startPreview();
   if (startOpts.scoring !== 'throws') h += '<div class="opt"><div class="warnbox" style="margin:0">予備: 結果だけ入力で始めます（1投ごとの記録はしません）。<br><a href="#" data-opt="scoring" data-v="throws">1投ごとに記録に戻す</a></div></div>';
   var foot = startOpts.scoring === 'throws' ? '<p class="muted" style="margin:4px 0 0;text-align:right"><a href="#" data-opt="scoring" data-v="manual" style="color:var(--muted);font-weight:400">予備: 結果だけ入力で始める</a></p>' : '';
-  var canStart = pick[1].length && pick[2].length && !singlesFull();
+  var canStart = pick[1].length && pick[2].length && !singlesFull() && !vsFixedOver().length;
   h += '<div class="startrow">' + (startOpts.scoring === 'throws'
       ? '<button class="btn" id="nextStep"' + (canStart ? '' : ' disabled') + '>次へ<small>投擲順・先攻を決める</small></button>'
       : '<button class="btn" id="startBtn"' + (canStart ? '' : ' disabled') + '>試合開始</button>') + '<button class="btn ghost" id="clearBtn">クリア</button></div>' + foot;
@@ -777,6 +780,24 @@ function viewPlay() {
 function singlesFull() { // 同じ2人の1vs1が上限に達しているか（設計書 19.1）
   return pick[1].length === 1 && pick[2].length === 1 && singles(pick[1][0], pick[2][0]) >= n(S.settings.max_singles_vs_same, 3);
 }
+// 鴨王が1人のチーム（固定レートで計算する試合）との対戦の上限（1人あたり合計 max_vs_fixed_solo、うち1vs1 max_vs_fixed_singles）
+// 上限に達している相手の { name, singles } の一覧（singles: 1vs1 の上限に当たったか）
+function vsFixedLimits() { return { solo: n(S.settings.max_vs_fixed_solo, 5), singles: n(S.settings.max_vs_fixed_singles, 3) }; }
+function vsFixedCount(id) { return (S.vs_fixed || {})[id] || { solo: 0, singles: 0 }; }
+function vsFixedOver() {
+  var lim = vsFixedLimits(), out = [];
+  [1, 2].forEach(function (t) {
+    var me = pick[t], opp = pick[3 - t];
+    if (!(me.length === 1 && P(me[0]).fixed)) return;
+    opp.forEach(function (id) {
+      if (P(id).fixed) return;
+      var c = vsFixedCount(id);
+      if (c.solo >= lim.solo) out.push({ name: P(id).name, singles: false });
+      else if (opp.length === 1 && c.singles >= lim.singles) out.push({ name: P(id).name, singles: true });
+    });
+  });
+  return out;
+}
 function startPreview() {
   if (!(pick[1].length && pick[2].length)) return '';
   var av = function (t) { var a = teamAvg(pick[t]); return a === null ? '－' : a.toFixed(1); };
@@ -784,6 +805,11 @@ function startPreview() {
   var h = '<div class="preview">平均レート チーム1 <b>' + av(1) + '</b> ／ チーム2 <b>' + av(2) + '</b>' +
     (teamed ? '<div class="muted">鴨王がほかの人と組むときは、鴨王の参考レートで平均を出します</div>' : '') + '</div>';
   if (singlesFull()) h += '<div class="warnbox">この2人の1vs1は上限の' + n(S.settings.max_singles_vs_same, 3) + '試合に達しています</div>';
+  var lim = vsFixedLimits();
+  vsFixedOver().forEach(function (o) {
+    h += '<div class="warnbox">' + esc(o.name) + ' さんは' + (o.singles ? '鴨王との1vs1が上限の' + lim.singles + '試合に達しています（鴨王1人vs複数、鴨王がほかの人と組む試合はできます）'
+      : '鴨王が1人のチームとの対戦（1vs1・鴨王1人vs複数）が上限の' + lim.solo + '試合に達しています（鴨王がほかの人と組む試合はできます）') + '</div>';
+  });
   return h;
 }
 // 選手選び画面（設計書 19.2）。teamPick = { t, sel: [選んだ順のID] }。確定するまで pick は変えない
@@ -911,6 +937,7 @@ function viewRule() {
   h += sec('予選通過の条件', '<ul>' +
     '<li><b>最低' + minM + '試合</b>、そのうち<b>チーム戦' + minT + '試合以上</b>。ランキングの試合数とチーム戦は、達すると緑の ✓ が付きます。</li>' +
     '<li>同じ相手との個人戦（1対1）は' + maxSingles + '試合まで。</li>' +
+    (boss.length ? '<li>鴨王が1人のチーム（1対1・鴨王1人対複数）との対戦は1人' + n(s.max_vs_fixed_solo, 5) + '試合まで、そのうち1対1は' + n(s.max_vs_fixed_singles, 3) + '試合まで。鴨王がほかの人と組んだ試合は何試合でもできます。</li>' : '') +
     '<li>順位は<b>合計（レート＋ボーナス）</b>の順。最低条件を満たした人の上位' + q + '名が通過で、ランキングの色付きの行が今の時点の通過圏内です。</li></ul>');
   h += sec('ボーナス', '<p>条件を達成すると、誰でもレートにボーナスが足されます（予選中も見込みとして合計に入っています）。</p><ul>' +
     '<li>勝利数: ' + step + '勝ごとに +' + stepPt + '</li>' +
@@ -928,6 +955,7 @@ function viewRule() {
       '<li>予選が終わったら、鴨王の参考合計を予選参加者の最終合計と比べ、<b>その順位を順位戦の投げ順などに使います</b>。</li>' +
       '<li>鴨王の公式のレートは固定のままで、参考レート・参考合計は予選の順位・通過や特別賞には使いません。ランキングのレイドバトル欄、個人ページ、対戦履歴（「参考」の増減）で見られます。</li>' +
       '<li>例外として、鴨王が<b>ほかの人と組んだチーム</b>は、鴨王を参考レートとしてチームの平均を出し、味方・相手のレートの増減を計算します（鴨王が1人のチームは' + fixedR + 'で計算）。</li></ul>';
+    bh += '<p>' + fixedR + 'で計算する対戦（鴨王が1人のチーム: 1対1・鴨王1人対複数）は、<b>1人' + n(s.max_vs_fixed_solo, 5) + '試合まで</b>（そのうち1対1は' + n(s.max_vs_fixed_singles, 3) + '試合まで）です。鴨王がほかの人と組んだ試合は何試合でもできます。</p>';
     h += sec('鴨王（前回王者）', bh);
   }
   h += sec('特別賞', '<p>MVP賞（勝率）、連勝王、ジャイキリ賞（格上に勝った最大のレート差）、平均得点王、ルーキー賞などがあり、「特別賞」タブで今の順位を見られます。</p>');
@@ -1477,7 +1505,9 @@ function viewMe() {
       '<div class="ebrow ebtotal"><span>合計</span><b class="ebpt">+' + eb.total + 'pt</b></div>');
   }
   var opp = Object.keys(S.singles).filter(function (k) { return k.split('|').indexOf(id) >= 0; });
-  var secCount = sec('singles_count', '1vs1の対戦回数', opp.length ? '<p class="muted">同じ相手とは ' + n(s.max_singles_vs_same, 3) + ' 試合まで</p>' + opp.map(function (k) { var o = k.split('|').filter(function (x) { return x !== id; })[0]; return '<span class="chip">' + esc(P(o).name) + ' ' + S.singles[k] + '</span>'; }).join('') : '<p class="muted">まだ個人戦がありません</p>');
+  var vfc = vsFixedCount(id), vfl = vsFixedLimits();
+  var vfLine = !p.fixed && S.players.some(function (x) { return x.fixed; }) ? '<p style="margin:0 0 8px">鴨王が1人のチームとの対戦: <b>' + vfc.solo + '</b> / ' + vfl.solo + '試合 <span class="muted">（うち1vs1 ' + vfc.singles + ' / ' + vfl.singles + '試合。鴨王がほかの人と組んだ試合は数えません）</span></p>' : '';
+  var secCount = sec('singles_count', '1vs1の対戦回数', vfLine + (opp.length ? '<p class="muted">同じ相手とは ' + n(s.max_singles_vs_same, 3) + ' 試合まで</p>' + opp.map(function (k) { var o = k.split('|').filter(function (x) { return x !== id; })[0]; return '<span class="chip">' + esc(P(o).name) + ' ' + S.singles[k] + '</span>'; }).join('') : '<p class="muted">まだ個人戦がありません</p>'));
   // 直近の試合
   var ms = S.matches.filter(function (m) { return m.status === 'done' && m.team1.concat(m.team2).indexOf(id) >= 0; });
   var shown = meAllMatches ? ms : ms.slice(0, 10);
