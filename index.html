@@ -244,6 +244,12 @@ input[type=number] { width: 80px; }
 .stat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
 .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
 svg.chart { width: 100%; height: auto; display: block; }
+.daydelta { margin-top: 12px; }
+.daydelta table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.daydelta th { font-weight: 400; color: var(--muted); font-size: 12px; text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.daydelta td { padding: 6px; border-bottom: 1px solid var(--line); }
+.daydelta .num { text-align: right; }
+.rksort button { padding: 6px 10px; font-size: 13px; }
 .loading { text-align: center; padding: 40px; color: var(--muted); }
 /* スコア入力 */
 .seg { display: inline-flex; border: 1px solid var(--accent); border-radius: 10px; overflow: hidden; }
@@ -433,6 +439,7 @@ var listOpen = {}; // 個人ページの「組んだ人・戦った相手」の�
 var pick = { 1: [], 2: [] };
 var filter = '';
 var meView = '', meFilter = '', meAllMatches = false;
+var rankSort = 'total'; // ランキングの並び（total: 合計順 / rating: レート順）
 var logOpen = {}; // 履歴タブの日ごとの開閉（日付 → 開いているか）
 var adminKey = '';
 var startOpts = { scoring: 'throws', use_order: true, first_team: null }; // 標準は1投ごとの記録（個人の投擲順あり）。結果だけ入力は予備
@@ -651,15 +658,19 @@ function viewRank() {
   var s = S.settings, q = n(s.qualify_count, 8);
   // 上位 q 位（同点で q 位が並ぶときはその人まで）の下に区切り線を引く。最低条件を満たしているかは問わない
   var topCount = S.ranking.filter(function (r) { return r.rank <= q; }).length;
-  var h = '<div class="card"><h2>ランキング</h2><div class="scroll"><table class="rktable"><thead><tr><th class="num">順位</th><th>名前</th><th class="num">レート</th><th class="num">ボーナス</th><th class="num">合計</th><th class="num">試合数</th><th class="num">チーム戦</th></tr></thead><tbody>';
-  S.ranking.forEach(function (r, i) {
-    var cls = (r.qualify_zone ? 'zone' : '') + (i === topCount - 1 && topCount < S.ranking.length ? ' cut' : '');
+  // 並び替え: 合計順（いつもの順位）/ レート順。レート順のときは太線を引かない
+  var byRate = rankSort === 'rating', rows = S.ranking.slice();
+  if (byRate) rows.sort(function (a, b) { return b.rating - a.rating || a.rank - b.rank; });
+  var h = '<div class="card"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px"><h2 style="margin:0">ランキング</h2>' +
+    '<div class="seg rksort"><button data-rksort="total" class="' + (byRate ? '' : 'on') + '">合計順</button><button data-rksort="rating" class="' + (byRate ? 'on' : '') + '">レート順</button></div></div><div class="scroll"><table class="rktable"><thead><tr><th class="num">順位</th><th>名前</th><th class="num">レート</th><th class="num">ボーナス</th><th class="num">合計</th><th class="num">試合数</th><th class="num">チーム戦</th></tr></thead><tbody>';
+  rows.forEach(function (r, i) {
+    var cls = (r.qualify_zone ? 'zone' : '') + (!byRate && i === topCount - 1 && topCount < S.ranking.length ? ' cut' : '');
     h += '<tr class="' + cls + '"><td class="num">' + r.rank + '</td><td><a href="#" data-me="' + esc(r.player_id) + '">' + esc(r.name) + '</a>' + (r.playoff ? '<span class="badge warn">プレーオフ</span>' : '') + '</td>' +
       '<td class="num">' + r.rating + '</td><td class="num rkbonus">' + (r.bonus > 0 ? '+' : '') + r.bonus + '</td><td class="num"><b>' + r.total + '</b></td>' +
       '<td class="num">' + quotaCell(r.matches, n(s.min_matches, 15)) + '</td><td class="num">' + quotaCell(r.team_matches, n(s.min_team_matches, 5)) + '</td></tr>';
   });
   h += '</tbody></table></div>';
-  h += '<p class="muted" style="margin:10px 0 0">合計（レート＋ボーナス）の順です。太線より上が上位' + q + '名です（最低条件を満たしていない人も含みます）。色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
+  h += '<p class="muted" style="margin:10px 0 0">' + (byRate ? '<b>レートの高い順</b>に並べています。順位の欄は合計（レート＋ボーナス）での順位のままです。' : '合計（レート＋ボーナス）の順です。太線より上が上位' + q + '名です（最低条件を満たしていない人も含みます）。') + '色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
   if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { var st = p.stats, sw = st.solo_wins || 0, sl = st.solo_losses || 0;
     return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + st.matches + '試合 ' + st.wins + '勝' + st.losses + '敗' +
@@ -823,10 +834,16 @@ function startPreview() {
 // 選手選び画面（設計書 19.2）。teamPick = { t, sel: [選んだ順のID] }。確定するまで pick は変えない
 var teamPick = null;
 function viewTeamPick() {
-  var t = teamPick.t, sel = teamPick.sel, other = pick[3 - t], max = n(S.settings.max_team_size, 4), busy = busySet();
+  var t = teamPick.t, sel = teamPick.sel, max = n(S.settings.max_team_size, 4);
   var h = '<div class="card tpick"><button class="btn small ghost" id="tpBack">‹ 戻る</button><h2 style="margin-top:10px">チーム' + t + 'の選手を選ぶ <span class="muted" style="font-size:13px;font-weight:400">（最大' + max + '人）</span></h2>';
   h += '<input type="search" id="filter" placeholder="名前で絞り込み" value="' + esc(filter) + '" style="width:100%;margin-bottom:8px">';
-  h += '<div class="tplist">';
+  h += '<div class="tplist" id="tpList">' + tpListHtml() + '</div>';
+  h += '<div class="tpfoot"><button class="btn wide" id="tpOk">確定（' + sel.length + '人）</button></div></div>';
+  return h;
+}
+// 選手選びのリスト部分。絞り込みの文字を打つたびに、入力欄はそのままでリストだけ描き直す（日本語入力が途切れないように）
+function tpListHtml() {
+  var t = teamPick.t, sel = teamPick.sel, other = pick[3 - t], max = n(S.settings.max_team_size, 4), busy = busySet(), h = '';
   var cand = schCands ? schCands.ids : [], candShown = false;
   S.players.filter(function (p) { return p.active && (!filter || p.name.indexOf(filter) >= 0 || sel.indexOf(p.id) >= 0); })
     .sort(function (a, b) { return (cand.indexOf(b.id) >= 0) - (cand.indexOf(a.id) >= 0) || a.name.localeCompare(b.name, 'ja'); })
@@ -838,7 +855,6 @@ function viewTeamPick() {
       h += '<button class="tprow' + (k >= 0 ? ' on t' + t : '') + '" data-tp="' + esc(p.id) + '"' + (off ? ' disabled' : '') + '><span class="tpno">' + (k >= 0 ? (k + 1) + '.' : '') + '</span><span class="tpname">' + esc(p.name) + '</span>' +
         '<span class="muted">' + (inOther ? 'チーム' + (3 - t) : busy[p.id] ? '試合中' : p.rating + (p.fixed ? ' 固定' : '')) + '</span></button>';
     });
-  h += '</div><div class="tpfoot"><button class="btn wide" id="tpOk">確定（' + sel.length + '人）</button></div></div>';
   return h;
 }
 // 試合開始の画面2: 1セット目の先攻と、個人の投擲順（最初から入れる。入れない場合はチェック）
@@ -1383,13 +1399,19 @@ function viewLog() {
 }
 
 /* ---- 個人 ---- */
+// 選手の選択肢。絞り込みの文字を打つたびに、入力欄はそのままで選択肢だけ入れ替える
+function meOptions() {
+  var id = meView;
+  var list = S.players.slice().sort(function (a, b) { return a.name.localeCompare(b.name, 'ja'); })
+    .filter(function (p) { return !meFilter || p.name.indexOf(meFilter) >= 0 || p.id === id; });
+  return '<option value="">選手を選ぶ</option>' +
+    list.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === id ? ' selected' : '') + '>' + esc(p.name) + '（レート ' + p.rating + '）</option>'; }).join('');
+}
 function viewMe() {
   var s = S.settings, id = meView;
   // 選手を選ぶ: 名前で絞り込み + リスト（レートつき）
-  var list = S.players.slice().sort(function (a, b) { return a.name.localeCompare(b.name, 'ja'); })
-    .filter(function (p) { return !meFilter || p.name.indexOf(meFilter) >= 0 || p.id === id; });
   var h = '<div class="card mepick"><input type="search" id="meFilter" placeholder="名前で絞り込み" value="' + esc(meFilter) + '">' +
-    '<select id="meView"><option value="">選手を選ぶ</option>' + list.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === id ? ' selected' : '') + '>' + esc(p.name) + '（レート ' + p.rating + '）</option>'; }).join('') + '</select></div>';
+    '<select id="meView">' + meOptions() + '</select></div>';
   if (!id) return h;
   var p = P(id), st = p.stats || { matches: 0, team_matches: 0, wins: 0, losses: 0 };
   var r = S.ranking.filter(function (x) { return x.player_id === id; })[0];
@@ -1464,6 +1486,20 @@ function viewMe() {
     var dots = pts.length <= 40 ? pts.map(function (v, i) { return '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.5" fill="var(--accent)"/>'; }).join('') : '';
     body = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '">' + grid + '<polyline fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" points="' + chartLine + '"/>' + dots + '</svg>' +
       '<div class="row muted" style="justify-content:space-between"><span>最低 ' + lo0 + '</span><span>最高 ' + hi0 + '</span></div>';
+  }
+  // 日ごとの増減（日本時間の日付ごと。新しい日が上）
+  if (body) {
+    var days = [];
+    hist.forEach(function (x) {
+      var k = dayKey(x.at), d0 = days[days.length - 1];
+      if (!d0 || d0.k !== k) days.push(d0 = { k: k, at: x.at, n: 0, from: x.rating - x.delta });
+      d0.n++; d0.to = x.rating;
+    });
+    body += '<div class="daydelta"><div class="muted">日ごとの増減</div><table><thead><tr><th>日付</th><th class="num">試合</th><th class="num">増減</th><th class="num">その日の終わり</th></tr></thead><tbody>' +
+      days.slice().reverse().map(function (d) {
+        var dv = Math.round((d.to - d.from) * 10) / 10;
+        return '<tr><td>' + dayLabel(d.at) + '</td><td class="num">' + d.n + '</td><td class="num">' + (dv === 0 ? '±0' : sgn(dv)) + '</td><td class="num">' + d.to + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
   }
   if (body && p.fixed) body = '<p class="muted">レートは ' + p.rating + ' で固定です。これは、ほかの人と同じように ' + (hist[0].rating - hist[0].delta) + ' から変動した場合の参考の推移です。</p>' + body;
   var secChart = sec('chart', p.fixed ? 'レート推移（変動した場合・参考）' : 'レート推移', body);
@@ -2089,7 +2125,13 @@ document.getElementById('adminBtn').addEventListener('click', function () { if (
 document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; closeWatch(); if (tab === 'sched' && b.dataset.tab !== 'sched') schLeave(); if (tab !== 'sched' && b.dataset.tab === 'sched') schEnter(); schOpen = schForm = schBulk = null; tab = b.dataset.tab; render(); } });
 document.getElementById('main').addEventListener('toggle', function (e) { var d = e.target.dataset && e.target.dataset.logday; if (d) logOpen[d] = e.target.open; }, true);
 document.getElementById('main').addEventListener('toggle', function (e) { var k = e.target.dataset && e.target.dataset.sec; if (k) store('kamo_sec_' + k, e.target.open ? '1' : '0'); }, true);
-document.getElementById('main').addEventListener('input', function (e) { if (e.target.id === 'meFilter') { meFilter = e.target.value; var p0 = e.target.selectionStart; render(); var f0 = document.getElementById('meFilter'); f0.focus(); f0.setSelectionRange(p0, p0); return; } if (e.target.id === 'filter') { filter = e.target.value; var pos = e.target.selectionStart; render(); var f = document.getElementById('filter'); f.focus(); f.setSelectionRange(pos, pos); } });
+// 絞り込み: 入力欄は描き直さず、リスト（選択肢）だけを入れ替える。
+// 画面全体を描き直すと入力欄が作り直され、日本語の変換中の文字が消えたり、スマホのキーボードが閉じたりするため
+document.getElementById('main').addEventListener('input', function (e) {
+  if (e.target.id === 'meFilter') { meFilter = e.target.value; var mv = document.getElementById('meView'); if (mv) mv.innerHTML = meOptions(); return; }
+  if (e.target.id === 'filter') { filter = e.target.value; var tl = document.getElementById('tpList'); if (tl && teamPick) tl.innerHTML = tpListHtml(); }
+});
+document.getElementById('main').addEventListener('click', function (e) { var b = e.target.closest('[data-rksort]'); if (b) { rankSort = b.dataset.rksort; render(); } });
 document.getElementById('main').addEventListener('change', function (e) { if (e.target.id === 'meView') { meView = e.target.value; meAllMatches = false; store('kamo_view', meView); render(); } });
 document.getElementById('main').addEventListener('click', function (e) {
   var scl = e.target.closest('[data-scleg]');
