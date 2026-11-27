@@ -16,12 +16,15 @@ body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-
 header { background: var(--accent); color: var(--accent-ink); padding: 14px 16px 10px; }
 header { position: relative; }
 header h1 { padding-right: 112px; }
-.reloadbtn { position: absolute; top: 10px; right: 62px; background: transparent; color: var(--accent-ink); border: 1px solid currentColor; opacity: .7; border-radius: 8px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+header .sub { padding-right: 64px; }
+.hbtns { position: absolute; top: 10px; right: 12px; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.hrow { display: flex; gap: 6px; }
+.reloadbtn { background: transparent; color: var(--accent-ink); border: 1px solid currentColor; opacity: .7; border-radius: 8px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
 .reloadbtn:disabled { opacity: .4; cursor: default; }
 .reloadbtn .ri { display: inline-block; }
 .reloadbtn.busy .ri { animation: rspin .8s linear infinite; }
 @keyframes rspin { to { transform: rotate(360deg); } }
-.adminbtn { position: absolute; top: 10px; right: 12px; background: transparent; color: var(--accent-ink); border: 1px solid currentColor; opacity: .7; border-radius: 8px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+.adminbtn { background: transparent; color: var(--accent-ink); border: 1px solid currentColor; opacity: .7; border-radius: 8px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
 .adminbtn.on { opacity: 1; background: rgba(255,255,255,.15); }
 header h1 { margin: 0; font-size: 18px; letter-spacing: .04em; }
 header .sub { font-size: 12px; opacity: .85; margin-top: 2px; }
@@ -390,13 +393,15 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .rule .ruleh { font-size: 14px; margin: 10px 0 4px; } .rule ul { margin: 0 0 6px; padding-left: 1.2em; } .rule li { margin: 4px 0; line-height: 1.6; } .rule p { line-height: 1.6; margin: 0 0 8px; }
 .viewbanner { background: var(--card); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; padding: 6px 16px; text-align: center; }
 body.viewonly header h1 { padding-right: 60px; }
-body.viewonly .reloadbtn { right: 12px; }
+body.viewonly header .sub { padding-right: 0; }
 </style>
 </head>
 <body>
 <header>
-  <button id="reloadBtn" class="reloadbtn" aria-label="最新の情報に更新"><span class="ri">↻</span> 更新</button>
-  <button id="adminBtn" class="adminbtn" aria-label="運営メニュー">運営</button>
+  <div class="hbtns">
+    <div class="hrow"><button id="ruleBtn" class="adminbtn" aria-label="ルール">ルール</button><button id="adminBtn" class="adminbtn" aria-label="運営メニュー">運営</button></div>
+    <button id="reloadBtn" class="reloadbtn" aria-label="最新の情報に更新"><span class="ri">↻</span> 更新</button>
+  </div>
   <h1>鴨王戦 予選レート戦</h1>
   <div class="sub" id="period"></div>
 </header>
@@ -509,7 +514,9 @@ function molkkyReplay(match, throws) {
     }
     var o = orderFor(st.leg);
     if (match.use_order && st.leg > 1 && !o) st.needOrder = true; // 2セット目以降は投擲順を選び直す
-    st.orders[st.leg - 1] = o || (st.orders[st.leg - 2] || [teams[0].slice(), teams[1].slice()]);
+    var prev = st.orders[st.leg - 2] || [teams[0].slice(), teams[1].slice()];
+    if (!o && st.leg === 2) prev = [prev[0].slice().reverse(), prev[1].slice().reverse()]; // 2セット目のチーム内の投擲順は、1セット目の逆順を初期値にする
+    st.orders[st.leg - 1] = o || prev;
     st.needSetup = st.needFirst || st.needOrder;
     st.turn = st.legFirst;
   }
@@ -615,6 +622,7 @@ function render() {
   if (!schOnTab) schCands = null;
   document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'sched') b.hidden = !schOnTab; });
   document.getElementById('adminBtn').classList.toggle('on', tab === 'admin');
+  document.getElementById('ruleBtn').classList.toggle('on', tab === 'rule' && !VIEW_ONLY);
   var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched, live: viewLive, rule: viewRule })[tab]();
   var osw = document.querySelector('.sctwrap.live'), keepY = watchId && osw && osw.scrollTop + osw.clientHeight < osw.scrollHeight - 4 ? osw.scrollTop : null; // 観戦中に上の方を見ていたら、更新しても動かさない
   document.getElementById('main').innerHTML = html;
@@ -912,7 +920,7 @@ function viewLive() {
   return h + '</div>' + viewLog();
 }
 
-/* ---- ルール（観戦用ページだけのタブ。観戦用リンク 設計書 9章）: 参加していない人向けのルールの概要。数字は settings から ---- */
+/* ---- ルール（観戦用ページはタブ、参加者用はヘッダーのルールボタン。観戦用リンク 設計書 9章）: 参加していない人向けのルールの概要。数字は settings から ---- */
 function viewRule() {
   var s = S.settings, q = n(s.qualify_count, 8), minM = n(s.min_matches, 15), minT = n(s.min_team_matches, 5);
   var maxTeam = n(s.max_team_size, 4), maxSingles = n(s.max_singles_vs_same, 3), init = n(s.initial_rating, 1500);
@@ -928,7 +936,7 @@ function viewRule() {
   h += sec('試合の形', '<ul>' +
     '<li>すべて<b>2チームの対戦</b>で、各チーム1〜' + maxTeam + '人（1対1、2対2、1対3 なども自由）。1対1を「個人戦」、それ以外を「チーム戦」と呼びます。</li>' +
     '<li><b>2セット先取</b>で勝ち。チームの中では順番に1人ずつ投げます。</li>' +
-    '<li>2セット目は1セット目の後攻チームが先攻。1-1 になったら、それまでの総得点の高いチームが3セット目の先攻・後攻を選びます。</li>' +
+    '<li>2セット目は1セット目の後攻チームが先攻で、チームの中の投げ順は1セット目の逆順が基本です。1-1 になったら、それまでの総得点の高いチームが3セット目の先攻・後攻を選びます。</li>' +
     '<li>試合はアプリで1投ごとに記録され、「試合」タブで試合中のスコア表を見られます。</li></ul>');
   h += sec('レートの計算', '<p>最初のレートは' + init + '（前回参加した人は前回の成績から補正）。試合のたびに、<b>チームの平均レート</b>どうしで増減を計算し、チームの全員に同じだけ反映します。</p>' +
     '<ul><li>勝ち: <b>+(' + wb + ' ＋ (相手の平均 − 自分の平均) × ' + wc + ')</b></li>' +
@@ -1157,7 +1165,7 @@ function setupView(m, loc, st) {
   if (m.use_order) {
     h += '<div class="teams">' + [1, 2].map(function (t) {
       var list = dr.o[t - 1];
-      return '<div class="team t' + t + '"><h3>チーム' + t + ' の投擲順</h3><ul class="olist">' + list.map(function (id, i) {
+      return '<div class="team t' + t + '"><h3>チーム' + t + ' の投擲順' + (st.leg === 2 && list.length > 1 ? '<small class="muted">（最初は1セット目の逆順）</small>' : '') + '</h3><ul class="olist">' + list.map(function (id, i) {
         return '<li><span>' + (i + 1) + '. ' + esc(P(id).name) + '</span>' + (i > 0 ? '<button class="btn small ghost" data-dup="' + esc(id) + '" data-team="' + t + '">↑</button>' : '') + '</li>';
       }).join('') + '</ul></div>';
     }).join('') + '</div>';
@@ -2075,6 +2083,8 @@ document.getElementById('reloadBtn').addEventListener('click', function () {
     .catch(function (e) { toast('更新できませんでした: ' + (e.message || e), true); })
     .then(function () { b.disabled = false; b.classList.remove('busy'); });
 });
+// ヘッダーの「ルール」: 観戦用ページのルールタブと同じ内容（参加者用はタブを増やさずボタンで開く）
+document.getElementById('ruleBtn').addEventListener('click', function () { if (tab === 'sched') schLeave(); scoreView = null; tab = 'rule'; render(); window.scrollTo(0, 0); });
 document.getElementById('adminBtn').addEventListener('click', function () { if (tab === 'sched') schLeave(); scoreView = null; tab = 'admin'; render(); window.scrollTo(0, 0); });
 document.getElementById('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { scoreView = null; teamPick = null; cancelArm = null; closeWatch(); if (tab === 'sched' && b.dataset.tab !== 'sched') schLeave(); if (tab !== 'sched' && b.dataset.tab === 'sched') schEnter(); schOpen = schForm = schBulk = null; tab = b.dataset.tab; render(); } });
 document.getElementById('main').addEventListener('toggle', function (e) { var d = e.target.dataset && e.target.dataset.logday; if (d) logOpen[d] = e.target.open; }, true);
@@ -2167,7 +2177,7 @@ if (VIEW_ONLY) { // 観戦用ページ: 試合・日程タブと運営ボタン�
   document.querySelector('header h1').textContent = '鴨王戦 予選（観戦用）';
   ['play', 'sched', 'log'].forEach(function (k) { var b = document.querySelector('#tabs [data-tab=' + k + ']'); b.parentNode.removeChild(b); });
   document.querySelector('#tabs [data-tab=live]').hidden = false; document.querySelector('#tabs [data-tab=rule]').hidden = false;
-  document.getElementById('adminBtn').style.display = 'none';
+  document.querySelector('header .hrow').style.display = 'none'; // ルールはタブで出すので、ルール・運営ボタンは消す
   document.getElementById('viewBanner').hidden = false;
 }
 load();

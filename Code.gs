@@ -849,7 +849,9 @@ function molkkyReplay(match, throws) {
     }
     var o = orderFor(st.leg);
     if (match.use_order && st.leg > 1 && !o) st.needOrder = true; // 2セット目以降は投擲順を選び直す
-    st.orders[st.leg - 1] = o || (st.orders[st.leg - 2] || [teams[0].slice(), teams[1].slice()]);
+    var prev = st.orders[st.leg - 2] || [teams[0].slice(), teams[1].slice()];
+    if (!o && st.leg === 2) prev = [prev[0].slice().reverse(), prev[1].slice().reverse()]; // 2セット目のチーム内の投擲順は、1セット目の逆順を初期値にする
+    st.orders[st.leg - 1] = o || prev;
     st.needSetup = st.needFirst || st.needOrder;
     st.turn = st.legFirst;
   }

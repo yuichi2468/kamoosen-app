@@ -375,7 +375,10 @@ t('個人の投擲順: 2本目は選び直すまで投げられず、選んだ�
   const m = { team1: ['a', 'b'], team2: ['x', 'y'], first_team: 1, use_order: true };
   const st = G.molkkyReplay(m, legWin1);
   eq([st.needSetup, st.needOrder, st.needFirst], [true, true, false]);
-  eq(st.orders[1], [['a', 'b'], ['x', 'y']]); // 前の本の順番が初期値
+  eq(st.orders[1], [['b', 'a'], ['y', 'x']]); // 2本目は1本目の逆順が初期値
+  const m3 = { team1: ['a', 'b', 'c'], team2: ['x'], first_team: 1, use_order: true, leg_orders: [null, [['c', 'a', 'b'], ['x']]] };
+  const st3 = G.molkkyReplay(m3, legWin1.concat([N(1), N(1)]).concat(legWin1.slice(0, 2)));
+  eq(st3.orders[1], [['c', 'a', 'b'], ['x']]); // 選び直した順はそのまま
   const m2 = Object.assign({}, m, { leg_orders: [null, [['b', 'a'], ['y', 'x']]] });
   const st2 = G.molkkyReplay(m2, legWin1.concat([N(1), N(1), N(1)]));
   eq(st2.log.slice(9).map(r => r.player), ['y', 'b', 'x']); // 2本目はチーム2先攻

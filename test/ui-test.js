@@ -62,8 +62,21 @@ const server = http.createServer((req, res) => {
     // ヘッダーの「更新」: ほかの端末で登録された試合が、押すとすぐ画面に出る
     const before = await page.evaluate(() => S.matches.length);
     const r = g.api('start', { team1: ['P10'], team2: ['P11'] }); if (!r.ok) throw new Error(r.error);
-    const box = await page.$eval('#reloadBtn', b => { const a = b.getBoundingClientRect(), c = document.getElementById('adminBtn').getBoundingClientRect(); return [a.right <= c.left, Math.abs(a.top - c.top) < 2]; });
-    if (!box[0] || !box[1]) throw new Error('更新ボタンが運営ボタンの左にない ' + box);
+    // ヘッダーの右上: 「ルール」「運営」が横に並び、「更新」はその下
+    const box = await page.evaluate(() => { const r = id => document.getElementById(id).getBoundingClientRect(), ru = r('ruleBtn'), ad = r('adminBtn'), re = r('reloadBtn');
+      return [ru.right <= ad.left, Math.abs(ru.top - ad.top) < 2, re.top >= ad.bottom, Math.abs(re.right - ad.right) < 2, re.bottom <= document.querySelector('header').getBoundingClientRect().bottom]; });
+    if (box.some(x => !x)) throw new Error('ルール・運営・更新ボタンの位置がおかしい ' + box);
+    // 参加者用アプリの「ルール」ボタン: タブは増やさず、観戦用ページのルールタブと同じ内容を出す
+    if (await page.isVisible('nav button[data-tab=rule]')) throw new Error('参加者用アプリにルールタブが出ている');
+    await page.click('#ruleBtn');
+    await page.waitForSelector('.rule');
+    { const rt = await page.textContent('#main');
+      for (const w of ['最低15試合', '上位8名', '1セット目の逆順']) if (!rt.includes(w)) throw new Error('ルールに「' + w + '」がない');
+      if (!(await page.$eval('#ruleBtn', b => b.classList.contains('on')))) throw new Error('ルールボタンが選択中にならない'); }
+    await page.screenshot({ path: path.join(out, '1b_rule.png'), fullPage: true });
+    await page.click('nav button[data-tab=rank]');
+    await page.waitForSelector('table');
+    if (await page.$eval('#ruleBtn', b => b.classList.contains('on'))) throw new Error('ランキングに戻ってもルールボタンが選択中');
     await page.click('#reloadBtn');
     await page.waitForFunction(n => S.matches.length === n + 1 && !document.getElementById('reloadBtn').disabled, before);
     await page.screenshot({ path: path.join(out, '1a_reload.png'), clip: { x: 0, y: 0, width: 390, height: 120 } });
@@ -239,7 +252,14 @@ const server = http.createServer((req, res) => {
   await throwPins(12); await throwPins(1); await throwPins(9); // 12+12+3+12 = 39 → +9 = 48
   await throwPins(3); await throwPins(2); // 48+2 = 50
   await page.waitForSelector('#legStart');
-  await page.click('[data-dup=P05]'); // 2本目は大西を1番目に
+  { // 2セット目のチーム内の投擲順は、1セット目の逆順が初期値
+    const o = await page.$$eval('.team.t1 .olist li span', x => x.map(e => e.textContent.replace(/^\d+\. /, '')));
+    const want = await page.evaluate(() => S.matches.find(m => m.id === scoringId).team1.slice().reverse().map(id => P(id).name));
+    if (o.join() !== want.join()) throw new Error('2セット目の投擲順が1セット目の逆順になっていない: ' + o + ' / ' + want);
+    console.log('leg2 default order:', o.join(' → '));
+  }
+  // 1セット目は 加藤 → 大西 なので、2セット目は何もしなくても 大西 が1番目（以前は ↑ で並べ替えていた）
+  if (await page.$('.team.t1 [data-dup=P05]')) throw new Error('逆順の初期値で大西が1番目になっていない');
   await page.screenshot({ path: path.join(out, '9_leg2_setup.png'), fullPage: true });
   await page.click('#legStart');
   await page.waitForSelector('.points');
@@ -489,6 +509,7 @@ const server = http.createServer((req, res) => {
     console.log('view tabs:', tabs.join(' / '));
     if (tabs.join('/') !== 'ランキング/試合/個人/特別賞/ルール') throw new Error('観戦用ページのタブがおかしい: ' + tabs);
     if (await vp.isVisible('#adminBtn')) throw new Error('観戦用ページに運営ボタンがある');
+    if (await vp.isVisible('#ruleBtn')) throw new Error('観戦用ページにルールボタンがある（タブで出す）');
     if (!(await vp.isVisible('#reloadBtn'))) throw new Error('観戦用ページに更新ボタンがない');
     if (!/観戦用のページです/.test(await vp.textContent('#viewBanner'))) throw new Error('観戦用の帯がない');
     if ((await vp.title()) !== '鴨王戦 予選（観戦用）') throw new Error('タイトルが違う: ' + (await vp.title()));
