@@ -1225,7 +1225,8 @@ function publicState_() {
   var pubCfg = {};
   ['start_at', 'end_at', 'result_deadline', 'initial_rating', 'win_base', 'win_coef', 'loss_base', 'loss_coef',
    'min_gain', 'min_loss', 'max_team_size', 'max_singles_vs_same', 'min_matches', 'min_team_matches',
-   'qualify_count', 'virtual_rating_visible'].forEach(function (k) {
+   'qualify_count', 'virtual_rating_visible',
+   'bonus_wins_step', 'bonus_wins_pt', 'bonus_partner_tiers', 'bonus_opponent_tiers', 'bonus_rookie_pt'].forEach(function (k) { // bonus_* は観戦用ページのルールタブで使う
     var v = cfg[k];
     pubCfg[k] = v instanceof Date ? v.getTime() : v;
   });

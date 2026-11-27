@@ -387,6 +387,7 @@ body.scoring .keys.throwkeys .btn { padding: 21px 8px; font-size: 18px; }
 .tpsec { font-size: 12px; color: var(--muted); font-weight: 700; margin: 6px 0 0; }
 @media (max-width: 480px) { .teams { grid-template-columns: 1fr; } .hide-sm { display: none; } }
 @media (max-width: 480px) { nav button { min-width: 0; padding: 12px 2px; font-size: 13px; } }
+.rule ul { margin: 0 0 6px; padding-left: 1.2em; } .rule li { margin: 4px 0; line-height: 1.6; } .rule p { line-height: 1.6; margin: 0 0 8px; }
 .viewbanner { background: var(--card); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; padding: 6px 16px; text-align: center; }
 body.viewonly header h1 { padding-right: 60px; }
 body.viewonly .reloadbtn { right: 12px; }
@@ -401,12 +402,13 @@ body.viewonly .reloadbtn { right: 12px; }
 </header>
 <nav id="tabs">
   <button data-tab="rank" class="on">ランキング</button>
-  <button data-tab="live" hidden>試合中</button>
+  <button data-tab="live" hidden>試合</button>
   <button data-tab="play">試合</button>
   <button data-tab="log">履歴</button>
   <button data-tab="me">個人</button>
   <button data-tab="awards">特別賞</button>
   <button data-tab="sched">日程</button>
+  <button data-tab="rule" hidden>ルール</button>
 </nav>
 <div class="viewbanner" id="viewBanner" hidden>観戦用のページです（見るだけ）・記録は参加者用のアプリで</div>
 <main id="main"><div class="loading">読み込み中…</div></main>
@@ -608,13 +610,12 @@ function render() {
   s.end_at_label = function () { var now = Date.now(); if (now < s.start_at) return '開始前'; if (now >= s.end_at) return '試合開始は締切済み'; var h = Math.floor((s.end_at - now) / 3600000); return '残り ' + Math.floor(h / 24) + '日' + (h % 24) + '時間'; };
   document.getElementById('period').textContent = '期間 ' + fmt(s.start_at) + ' 〜 ' + fmt(s.end_at) + '（' + s.end_at_label() + '）';
   var schOnTab = s.sched_visible !== false && !VIEW_ONLY; // 日程タブは運営画面で非表示にできる（観戦用ページでは出さない）
-  if (VIEW_ONLY && (tab === 'play' || tab === 'admin' || tab === 'sched')) tab = 'rank';
+  if (VIEW_ONLY && (tab === 'play' || tab === 'admin' || tab === 'sched' || tab === 'log')) tab = 'rank';
   if (!schOnTab && tab === 'sched') { schLeave(); schOpen = schForm = schBulk = null; tab = 'rank'; }
   if (!schOnTab) schCands = null;
   document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'sched') b.hidden = !schOnTab; });
-  if (VIEW_ONLY) { var nLive = S.matches.filter(function (m) { return m.status === 'playing'; }).length; document.querySelector('#tabs [data-tab=live]').textContent = '試合中' + (nLive ? ' ' + nLive : ''); }
   document.getElementById('adminBtn').classList.toggle('on', tab === 'admin');
-  var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched, live: viewLive })[tab]();
+  var html = scoreView ? viewScoreScreen() : ({ rank: viewRank, play: viewPlay, log: viewLog, me: viewMe, awards: viewAwardsTab, admin: viewAdmin, sched: viewSched, live: viewLive, rule: viewRule })[tab]();
   var osw = document.querySelector('.sctwrap.live'), keepY = watchId && osw && osw.scrollTop + osw.clientHeight < osw.scrollHeight - 4 ? osw.scrollTop : null; // 観戦中に上の方を見ていたら、更新しても動かさない
   document.getElementById('main').innerHTML = html;
   var sw = document.querySelector('.sctwrap.live'); if (sw) sw.scrollTop = keepY !== null ? keepY : sw.scrollHeight; // 最新のターンが見えるように
@@ -872,15 +873,60 @@ function matchCard(m) {
   return h + '</div>';
 }
 
-/* ---- 試合中（観戦用ページだけのタブ。観戦用リンク 設計書 4章）: 試合中の一覧と試合の観戦画面。操作はなし ---- */
+/* ---- 試合（観戦用ページだけのタブ。観戦用リンク 設計書 9章）: 上に試合中の一覧、その下に対戦履歴。操作はなし ---- */
 function viewLive() {
   if (watchId) return viewWatch();
   var playing = S.matches.filter(function (m) { return m.status === 'playing'; });
-  var h = '<div class="card"><h2>試合中</h2>';
-  if (!playing.length) return h + '<p class="muted">いま試合中の試合はありません。</p></div>';
-  h += '<p class="muted" style="margin-top:0">タップするとスコア表が見られます（約' + (WATCH_MS / 1000) + '秒ごとに更新）。</p>';
-  playing.forEach(function (m) { h += matchCard(m); });
-  return h + '</div>';
+  var h = '<div class="card"><h2>試合中' + (playing.length ? '（' + playing.length + '）' : '') + '</h2>';
+  if (!playing.length) h += '<p class="muted" style="margin:0">いま試合中の試合はありません。</p>';
+  else {
+    h += '<p class="muted" style="margin-top:0">タップするとスコア表が見られます（約' + (WATCH_MS / 1000) + '秒ごとに更新）。</p>';
+    playing.forEach(function (m) { h += matchCard(m); });
+  }
+  return h + '</div>' + viewLog();
+}
+
+/* ---- ルール（観戦用ページだけのタブ。観戦用リンク 設計書 9章）: 参加していない人向けのルールの概要。数字は settings から ---- */
+function viewRule() {
+  var s = S.settings, q = n(s.qualify_count, 8), minM = n(s.min_matches, 15), minT = n(s.min_team_matches, 5);
+  var maxTeam = n(s.max_team_size, 4), maxSingles = n(s.max_singles_vs_same, 3), init = n(s.initial_rating, 1500);
+  var wb = n(s.win_base, 24), wc = n(s.win_coef, 0.06), lb = n(s.loss_base, 20), lc = n(s.loss_coef, 0.05), mg = n(s.min_gain, 10), ml = Math.abs(n(s.min_loss, 10));
+  var tiers = function (v, def) {
+    return String(v || def).split(',').map(function (x) { var a = x.split(':'); return (String(a[0]).trim() === 'all' ? '全員' : a[0].trim() + '人') + ' +' + String(a[1]).trim(); }).join('、');
+  };
+  var step = n(s.bonus_wins_step, 10), stepPt = n(s.bonus_wins_pt, 10), rookiePt = n(s.bonus_rookie_pt, 30);
+  var boss = S.players.filter(function (p) { return p.fixed; });
+  var sec = function (title, body) { return '<div class="card rule"><h2>' + title + '</h2>' + body + '</div>'; };
+  var h = sec('鴨王戦の予選', '<p>期間中（' + fmt(s.start_at) + ' 〜 ' + fmt(s.end_at) + '）に、参加者どうしが自由に組んで試合をし、結果をレートに反映する<b>フリー対戦制</b>のレート戦です。</p>' +
+    '<p>期間が終わった時点で<b>合計（レート＋ボーナス）の上位' + q + '名</b>が、本戦の順位戦に進みます。</p>');
+  h += sec('モルックの基本', '<ul>' +
+    '<li>1〜12の数字が書かれた木のピン（スキットル）を、木の棒（モルック）を投げて倒します。</li>' +
+    '<li><b>1本だけ倒したら、そのピンの数字</b>が得点。<b>2本以上倒したら、倒した本数</b>が得点です。</li>' +
+    '<li>倒れたピンは、倒れた場所で立て直して続けます（だんだん散らばっていきます）。</li>' +
+    '<li><b>ちょうど50点</b>にしたチームがセットを取ります。<b>50点を超えると25点に戻ります</b>（バースト）。</li>' +
+    '<li>1本も倒せないとミス。チームで<b>3回続けてミスすると失格</b>で、そのセットは相手が取ります。</li></ul>');
+  h += sec('試合の形', '<ul>' +
+    '<li>すべて<b>2チームの対戦</b>で、各チーム1〜' + maxTeam + '人（1対1、2対2、1対3 なども自由）。1対1を「個人戦」、それ以外を「チーム戦」と呼びます。</li>' +
+    '<li><b>2セット先取</b>で勝ち。チームの中では順番に1人ずつ投げます。</li>' +
+    '<li>2セット目は1セット目の後攻チームが先攻。1-1 になったら、それまでの総得点の高いチームが3セット目の先攻・後攻を選びます。</li>' +
+    '<li>試合はアプリで1投ごとに記録され、「試合」タブで試合中のスコア表を見られます。</li></ul>');
+  h += sec('レートの計算', '<p>最初のレートは' + init + '（前回参加した人は前回の成績から補正）。試合のたびに、<b>チームの平均レート</b>どうしで増減を計算し、チームの全員に同じだけ反映します。</p>' +
+    '<ul><li>勝ち: <b>+(' + wb + ' ＋ (相手の平均 − 自分の平均) × ' + wc + ')</b></li>' +
+    '<li>負け: <b>−(' + lb + ' ＋ (自分の平均 − 相手の平均) × ' + lc + ')</b></li></ul>' +
+    '<p class="muted">四捨五入し、勝ちは最低 +' + mg + '、負けは最低 −' + ml + '。格上に勝つほど大きく上がり、格下に負けるほど大きく下がります。例: 1500 どうしなら勝ち +' + Math.max(mg, Math.round(wb)) + '、負け −' + Math.max(ml, Math.round(lb)) + '。</p>');
+  h += sec('予選通過の条件', '<ul>' +
+    '<li><b>最低' + minM + '試合</b>、そのうち<b>チーム戦' + minT + '試合以上</b>。ランキングの試合数とチーム戦は、達すると緑の ✓ が付きます。</li>' +
+    '<li>同じ相手との個人戦（1対1）は' + maxSingles + '試合まで。</li>' +
+    '<li>順位は<b>合計（レート＋ボーナス）</b>の順。最低条件を満たした人の上位' + q + '名が通過で、ランキングの色付きの行が今の時点の通過圏内です。</li></ul>');
+  h += sec('ボーナス', '<p>条件を達成すると、誰でもレートにボーナスが足されます（予選中も見込みとして合計に入っています）。</p><ul>' +
+    '<li>勝利数: ' + step + '勝ごとに +' + stepPt + '</li>' +
+    '<li>チーム戦で組んだ人数: ' + esc(tiers(s.bonus_partner_tiers, '5:5,10:15,20:30,30:45,all:100')) + '</li>' +
+    '<li>個人戦で戦った相手の人数: ' + esc(tiers(s.bonus_opponent_tiers, '5:5,10:15,20:35,30:55,all:100')) + '</li>' +
+    (rookiePt ? '<li>1回生: +' + rookiePt + '（ハンデ）</li>' : '') + '</ul>' +
+    '<p class="muted">人数の区分は、到達したいちばん上の区分のポイントだけがもらえます。</p>');
+  if (boss.length) h += sec('鴨王（前回王者）', '<p>' + boss.map(function (p) { return esc(p.name); }).join('・') + 'は予選免除で、レートは<b>' + boss[0].rating + 'に固定</b>したまま対戦に参加します（レイドバトル）。鴨王に勝つと大きくレートが上がります。予選の順位には入りません。</p>');
+  h += sec('特別賞', '<p>MVP賞（勝率）、連勝王、ジャイキリ賞（格上に勝った最大のレート差）、平均得点王、ルーキー賞などがあり、「特別賞」タブで今の順位を見られます。</p>');
+  return h;
 }
 
 /* ---- 観戦（設計書 第21章）: 読み取りだけ。記録中の端末には何も送らない ---- */
@@ -2084,8 +2130,8 @@ if (VIEW_ONLY) { // 観戦用ページ: 試合・日程タブと運営ボタン�
   document.body.classList.add('viewonly');
   document.title = '鴨王戦 予選（観戦用）';
   document.querySelector('header h1').textContent = '鴨王戦 予選（観戦用）';
-  ['play', 'sched'].forEach(function (k) { var b = document.querySelector('#tabs [data-tab=' + k + ']'); b.parentNode.removeChild(b); });
-  document.querySelector('#tabs [data-tab=live]').hidden = false;
+  ['play', 'sched', 'log'].forEach(function (k) { var b = document.querySelector('#tabs [data-tab=' + k + ']'); b.parentNode.removeChild(b); });
+  document.querySelector('#tabs [data-tab=live]').hidden = false; document.querySelector('#tabs [data-tab=rule]').hidden = false;
   document.getElementById('adminBtn').style.display = 'none';
   document.getElementById('viewBanner').hidden = false;
 }

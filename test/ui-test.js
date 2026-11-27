@@ -487,7 +487,7 @@ const server = http.createServer((req, res) => {
     await vp.waitForSelector('table');
     const tabs = await vp.$$eval('#tabs button', b => b.filter(x => !x.hidden).map(x => x.textContent.trim()));
     console.log('view tabs:', tabs.join(' / '));
-    if (tabs.join('/') !== 'ランキング/試合中 2/履歴/個人/特別賞') throw new Error('観戦用ページのタブがおかしい: ' + tabs);
+    if (tabs.join('/') !== 'ランキング/試合/個人/特別賞/ルール') throw new Error('観戦用ページのタブがおかしい: ' + tabs);
     if (await vp.isVisible('#adminBtn')) throw new Error('観戦用ページに運営ボタンがある');
     if (!(await vp.isVisible('#reloadBtn'))) throw new Error('観戦用ページに更新ボタンがない');
     if (!/観戦用のページです/.test(await vp.textContent('#viewBanner'))) throw new Error('観戦用の帯がない');
@@ -497,8 +497,16 @@ const server = http.createServer((req, res) => {
     await vp.click('[data-me="P01"]');
     await vp.waitForSelector('.hero');
     if (!/青木/.test(await vp.textContent('.heroname'))) throw new Error('観戦用ページで個人タブが開かない');
-    // 履歴: 1投ごとに記録した試合のスコア表が開く
-    await vp.click('nav button[data-tab=log]');
+    // ルール: 設定の数字（最低試合数・上位8名・ボーナスの区分）が入っている
+    await vp.click('nav button[data-tab=rule]');
+    await vp.waitForSelector('.rule');
+    { const rt = await vp.textContent('#main');
+      for (const w of ['モルックの基本', '最低15試合', 'チーム戦5試合以上', '上位8名', '5人 +5', '全員 +100', '1800に固定']) if (!rt.includes(w)) throw new Error('ルールタブに「' + w + '」がない'); }
+    await vp.screenshot({ path: path.join(out, '33_view_rule.png'), fullPage: true });
+    // 試合タブ: 上に試合中、その下に履歴。1投ごとに記録した試合のスコア表が開く
+    await vp.click('nav button[data-tab=live]');
+    await vp.waitForSelector('.logdays');
+    if (!/試合中（2）/.test(await vp.textContent('#main h2'))) throw new Error('試合タブの上に試合中がない');
     if (!(await vp.$eval('details.logdays', d => d.open))) throw new Error('観戦用ページの履歴で一番新しい日が開いていない');
     await vp.click('details.logdays summary');
     await vp.waitForFunction(() => !document.querySelector('details.logdays').open);
