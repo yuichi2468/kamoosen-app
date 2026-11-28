@@ -93,7 +93,7 @@ const server = http.createServer((req, res) => {
     console.log('ranking cut after row', cut.join(','), 'ranks', ranks.join(','));
     if (cut.length !== 1 || cut[0] !== want) throw new Error('8位の下に区切り線が無い: ' + cut);
     // 合計の下に8位との差（8位は ±0、上は＋、下は−）
-    const gap = await page.$$eval('.rktable tbody tr', r => r.map(x => [+x.cells[4].querySelector('b').textContent, x.querySelector('.rkgap').textContent]));
+    const gap = await page.$$eval('.rktable tbody tr', r => r.map(x => [+x.cells[4].querySelector('b').textContent, x.cells[5].textContent]));
     const t8 = gap[7][0];
     gap.forEach(([t, g8]) => { const d = t - t8, w = d > 0 ? '+' + d : d < 0 ? '−' + (-d) : '±0'; if (g8 !== w) throw new Error('8位との差が違う: ' + t + ' ' + g8 + ' ' + w); });
     console.log('gap to 8th ok', gap.map(x => x[1]).join(','));
@@ -415,7 +415,7 @@ const server = http.createServer((req, res) => {
   await page.selectOption('#meView', 'A');
   await page.click('nav button[data-tab=rank]');
   const heads = await page.$$eval('table.rktable th', x => x.map(y => y.textContent).join(','));
-  if (heads !== '順位,名前,レート,ボーナス,合計8位との差,試合数,チーム戦') throw new Error('ランキングの列: ' + heads);
+  if (heads !== '順位,名前,レート,ボーナス,合計,8位との差,試合数,チーム戦') throw new Error('ランキングの列: ' + heads);
   const rk = await page.$$eval('table.rktable tbody tr', rows => rows.map(r => [...r.children].map(c => c.innerText.replace(/\s+/g, ' ').trim())));
   console.log('ranking rows:', JSON.stringify(rk.slice(0, 4)));
   const raid = await page.$$eval('.card', cs => cs.map(c => c.textContent).filter(t => t.includes('レイドバトル')).join(''));
