@@ -785,7 +785,7 @@ var STATS_VIEWS = [
   { key: 'rate', label: 'レート', note: '増減は予選開始時のレートからの増減、最高は予選中の最高レートです。レート固定の人（王者）は公式のレートを出しています。', cols: ['rating', 'bonus', 'total', 'delta', 'high'] },
   { key: 'single', label: '個人戦の成績', note: 'セット内訳（2セット先取）です。先攻取得率は個人戦を1投ごとに記録した試合の集計です。', cols: ['w20', 'w21', 'l12', 'l02', 'first'] },
   { key: 'throw', label: '投擲', note: 'ヒット率・上がりは、個人の投擲順を入れて1投ごとに記録した試合（チーム戦を含む）の集計です。個人戦ヒット率と平均ブレイクは個人戦だけです。', cols: ['hit', 'throws', 'fin', 's_hit', 'brk'] },
-  { key: 'all', label: 'すべて（横スクロール）', wide: true, note: '全項目を1つの表にしています。表を左右にスワイプすると続きを見られます（順位と名前は左に固定）。',
+  { key: 'all', label: 'すべて', wide: true, note: '全項目を1つの表にしています。表を左右にスワイプすると続きを見られます（順位と名前は左に固定）。',
     groups: [['基本', ['total', 'gap', 'rating', 'bonus', 'need']], ['試合', ['matches', 'wins', 'losses', 'wr', 's_n', 's_w', 's_wr', 't_n', 't_w', 't_wr', 'best', 'cur', 'avg']],
              ['レート', ['start', 'high', 'low', 'delta']], ['ボーナスの内訳', ['eb_w', 'partners', 'eb_p', 'opponents', 'eb_o', 'rookie']],
              ['個人戦の成績', ['w20', 'w21', 'l12', 'l02', 's_hit', 'brk', 'fturn', 'lose', 'first', 'second']], ['投擲成績', ['hit', 'throws', 'fin', 'busts']], ['王者（参考）', ['vrate', 'vtotal']]] }
