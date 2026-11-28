@@ -678,7 +678,7 @@ function viewRank() {
       '<td class="num">' + quotaCell(r.matches, n(s.min_matches, 15)) + '</td><td class="num">' + quotaCell(r.team_matches, n(s.min_team_matches, 5)) + '</td></tr>';
   });
   h += '</tbody></table></div>';
-  h += '<p class="muted" style="margin:10px 0 0">' + (byRate ? '<b>レートの高い順</b>に並べています。順位の欄は合計（レート＋ボーナス）での順位のままです。' : '合計（レート＋ボーナス）の順です。太線より上が上位' + q + '名です（最低条件を満たしていない人も含みます）。') + (cutTotal !== null ? '「' + q + '位との差」は、' + q + '位の合計との差です（＋は上回っている点数、−は届いていない点数）。' : '') + '色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
+  h += '<p class="muted" style="margin:10px 0 0">' + (byRate ? '<b>レートの高い順</b>に並べています。順位の欄は合計（レート＋ボーナス）での順位のままです。' : '合計（レート＋ボーナス）の順です。') + '色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
   if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { var st = p.stats, sw = st.solo_wins || 0, sl = st.solo_losses || 0;
     return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + st.matches + '試合 ' + st.wins + '勝' + st.losses + '敗' +
