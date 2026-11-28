@@ -50,7 +50,7 @@ const fail = m => { throw new Error(m); };
     await page.waitForSelector('.rktable');
     const tag = watch ? '観戦用' : '参加者用';
     // ランキングの並び替え
-    const col = i => page.$$eval('.rktable tbody tr', (rs, i) => rs.map(r => r.children[i].textContent.trim()), i);
+    const col = i => page.$$eval('.rktable tbody tr', (rs, i) => rs.map(r => (r.children[i].querySelector('b') || r.children[i]).textContent.trim()), i);
     const tot0 = (await col(4)).map(Number);
     if (tot0.some((v, i) => i && v > tot0[i - 1])) fail(tag + ': 最初が合計順でない');
     await page.click('[data-rksort=rating]');
