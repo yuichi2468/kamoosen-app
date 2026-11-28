@@ -90,10 +90,10 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .chip.off { opacity: .6; border-style: dashed; }
 .rktable th, .rktable td { padding-left: 4px; padding-right: 4px; }
 .rkbonus { color: var(--win); }
-.rkgap { font-size: 11px; line-height: 1.2; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rkgap { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rkgap.gup { color: var(--win); }
 .rkgap.gdown { color: var(--lose); }
-.rkgaph { font-size: 10px; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.rkgaph { line-height: 1.2; white-space: nowrap; }
 /* 成績タブ: 全体成績の表（375px 幅で横スクロールなしで見られるよう、1画面に名前＋5列まで） */
 .seg.stsw { display: flex; margin-bottom: 14px; } .seg.stsw button { flex: 1; white-space: nowrap; }
 .stview { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
@@ -685,17 +685,17 @@ function viewRank() {
   // 8位（q 位）の合計との差。q 人に満たないときは出さない。レート順でも合計どうしの差を出す
   var cutTotal = S.ranking.length >= q ? S.ranking[q - 1].total : null;
   var gapCell = function (r) { if (cutTotal === null) return ''; var d = r.total - cutTotal;
-    return '<div class="rkgap' + (d > 0 ? ' gup' : d < 0 ? ' gdown' : '') + '">' + (d > 0 ? '+' + d : d < 0 ? '−' + (-d) : '±0') + '</div>'; };
+    return '<td class="num rkgap' + (d > 0 ? ' gup' : d < 0 ? ' gdown' : '') + '">' + (d > 0 ? '+' + d : d < 0 ? '−' + (-d) : '±0') + '</td>'; };
   var h = '<div class="card"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px"><h2 style="margin:0">ランキング</h2>' +
-    '<div class="seg rksort"><button data-rksort="total" class="' + (byRate ? '' : 'on') + '">合計順</button><button data-rksort="rating" class="' + (byRate ? 'on' : '') + '">レート順</button></div></div><div class="scroll"><table class="rktable"><thead><tr><th class="num">順位</th><th>名前</th><th class="num">レート</th><th class="num">ボーナス</th><th class="num">合計' + (cutTotal !== null ? '<div class="rkgaph">' + q + '位との差</div>' : '') + '</th><th class="num">試合数</th><th class="num">チーム戦</th></tr></thead><tbody>';
+    '<div class="seg rksort"><button data-rksort="total" class="' + (byRate ? '' : 'on') + '">合計順</button><button data-rksort="rating" class="' + (byRate ? 'on' : '') + '">レート順</button></div></div><div class="scroll"><table class="rktable"><thead><tr><th class="num">順位</th><th>名前</th><th class="num">レート</th><th class="num">ボーナス</th><th class="num">合計</th>' + (cutTotal !== null ? '<th class="num rkgaph">' + q + '位<br>との差</th>' : '') + '<th class="num">試合数</th><th class="num">チーム戦</th></tr></thead><tbody>';
   rows.forEach(function (r, i) {
     var cls = (r.qualify_zone ? 'zone' : '') + (!byRate && i === topCount - 1 && topCount < S.ranking.length ? ' cut' : '');
     h += '<tr class="' + cls + '"><td class="num">' + r.rank + '</td><td><a href="#" data-me="' + esc(r.player_id) + '">' + esc(r.name) + '</a>' + (r.playoff ? '<span class="badge warn">プレーオフ</span>' : '') + '</td>' +
-      '<td class="num">' + r.rating + '</td><td class="num rkbonus">' + (r.bonus > 0 ? '+' : '') + r.bonus + '</td><td class="num"><b>' + r.total + '</b>' + gapCell(r) + '</td>' +
+      '<td class="num">' + r.rating + '</td><td class="num rkbonus">' + (r.bonus > 0 ? '+' : '') + r.bonus + '</td><td class="num"><b>' + r.total + '</b></td>' + gapCell(r) + '' +
       '<td class="num">' + quotaCell(r.matches, n(s.min_matches, 15)) + '</td><td class="num">' + quotaCell(r.team_matches, n(s.min_team_matches, 5)) + '</td></tr>';
   });
   h += '</tbody></table></div>';
-  h += '<p class="muted" style="margin:10px 0 0">' + (byRate ? '<b>レートの高い順</b>に並べています。順位の欄は合計（レート＋ボーナス）での順位のままです。' : '合計（レート＋ボーナス）の順です。太線より上が上位' + q + '名です（最低条件を満たしていない人も含みます）。') + (cutTotal !== null ? '合計の下の小さな数字は、' + q + '位の合計との差です（＋は上回っている点数、−は届いていない点数）。' : '') + '色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + 'ボーナスは減ることがないので、予選中も合計に入れています。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
+  h += '<p class="muted" style="margin:10px 0 0">' + (byRate ? '<b>レートの高い順</b>に並べています。順位の欄は合計（レート＋ボーナス）での順位のままです。' : '合計（レート＋ボーナス）の順です。') + '色付きの行は、最低条件を満たした人の中での上位' + q + '名（今の時点の通過圏内）です。ボーナスは手動ボーナス・追加ボーナス・1回生のハンデの合計です。' + '</p><div class="minbox" style="margin:8px 0 0">予選通過には<b>最低 ' + n(s.min_matches, 15) + '試合</b>（そのうち<b>チーム戦 最低 ' + n(s.min_team_matches, 5) + '試合</b>）が必要です。<br><span class="muted">試合数とチーム戦は、足りないときは<b class="short">赤</b>、達したら<b class="met">緑✓</b>です。両方 ✓ で最低条件を達成です。</span></div></div>';
   var boss = S.players.filter(function (p) { return p.fixed; });
   if (boss.length) h += '<div class="card"><h2>レイドバトル</h2>' + boss.map(function (p) { var st = p.stats, sw = st.solo_wins || 0, sl = st.solo_losses || 0;
     return '<p>' + esc(p.name) + '（レート ' + p.rating + ' 固定）: ' + st.matches + '試合 ' + st.wins + '勝' + st.losses + '敗' +
