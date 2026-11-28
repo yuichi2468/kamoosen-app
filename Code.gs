@@ -1331,12 +1331,18 @@ function deviceLabel_(d) {
   return d ? '端末' + d : '端末不明';
 }
 
+/** シートの回数のセル。表示形式が日付になっていて Date で読めたときも回数に戻す（スプレッドシートの日付は 1899/12/30 からの日数） */
+function cellCount_(v) {
+  if (v instanceof Date) return Math.round((v.getTime() - new Date(1899, 11, 30).getTime()) / 86400000);
+  var x = Number(v);
+  return v === '' || v === null || v === undefined || !isFinite(x) ? 0 : x;
+}
 function readThrowStats_() {
   var map = {};
   if (!sheetExists_(SHEET.player_stats)) return map;
   readTable_(SHEET.player_stats).forEach(function (r) {
     var id = String(r.player_id);
-    map[id] = { throws: r.throws, hits: r.hits !== undefined && r.hits !== '' ? r.hits : r.throws - r.misses, points: r.points, misses: r.misses, hit_rate: r.hit_rate !== undefined && r.hit_rate !== '' ? r.hit_rate : (r.throws ? Math.round((1 - r.misses / r.throws) * 1000) / 10 : 0), wins: r.wins, busts: r.busts };
+    map[id] = { throws: r.throws, hits: r.hits !== undefined && r.hits !== '' ? r.hits : r.throws - r.misses, points: r.points, misses: r.misses, hit_rate: r.hit_rate !== undefined && r.hit_rate !== '' ? r.hit_rate : (r.throws ? Math.round((1 - r.misses / r.throws) * 1000) / 10 : 0), wins: r.wins, busts: cellCount_(r.busts) };
   });
   return map;
 }
