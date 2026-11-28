@@ -327,7 +327,7 @@ const server = http.createServer((req, res) => {
     await page.click('.sttable th[data-stsort=wins]');
     const w = await page.$$eval('.sttable tbody tr', trs => trs.map(t => Number(t.children[3].textContent)));
     if (w.some((x, i) => i && x > w[i - 1])) throw new Error('勝の並べ替えNG: ' + w);
-    for (const v of ['type', 'rate', 'single', 'throw']) { await page.click('[data-stview=' + v + ']'); await page.waitForSelector('[data-stview=' + v + '].on'); }
+    for (const v of ['type', 'rate', 'single', 'throw', 'all']) { await page.click('[data-stview=' + v + ']'); await page.waitForSelector('[data-stview=' + v + '].on'); }
     await page.click('[data-stview=win]');
   }
   await page.screenshot({ path: path.join(out, '12a_stats.png'), fullPage: true });

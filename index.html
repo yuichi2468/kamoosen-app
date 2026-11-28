@@ -109,6 +109,18 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .sttable td small { display: block; font-size: 10px; color: var(--muted); line-height: 1.1; }
 .sttable td.na { color: var(--muted); }
 .sttable tr.stfx td { background: var(--bg); }
+/* すべて（横スクロール）: 順位と名前を左に固定 */
+.stwide { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sttable.wide { width: auto; border-collapse: separate; border-spacing: 0; }
+.sttable.wide th, .sttable.wide td { padding: 6px 6px; }
+.sttable.wide th { white-space: nowrap; }
+.sttable.wide .strk, .sttable.wide .stnm { position: sticky; background: var(--card); z-index: 1; }
+.sttable.wide .strk { left: 0; min-width: 2.6em; max-width: 2.6em; box-sizing: border-box; }
+.sttable.wide .stnm { left: 2.6em; min-width: 5.2em; max-width: 5.2em; box-sizing: border-box; border-right: 1px solid var(--line); }
+.sttable.wide tr.stfx .strk, .sttable.wide tr.stfx .stnm { background: var(--bg); }
+.sttable.wide tr.stgrp th { text-align: left; color: var(--ink); border-left: 1px solid var(--line); }
+.sttable.wide tr.stgrp th span { position: sticky; left: calc(7.8em + 8px); } /* グループ名は横にスクロールしても見えるように */
+.sttable.wide tr.stgrp th.strk, .sttable.wide tr.stgrp th.stnm { border-left: 0; }
 .heroproj { font-size: 13px; margin-top: 2px; }
 .heroproj b { color: var(--win); }
 .ba { font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.4; margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -772,8 +784,13 @@ var STATS_VIEWS = [
   { key: 'type', label: '個人戦・チーム戦', note: '個人戦は1vs1、チーム戦はそれ以外（1人vs複数を含む）です。', cols: ['s_n', 's_wr', 't_n', 't_wr', 'avg'] },
   { key: 'rate', label: 'レート', note: '増減は予選開始時のレートからの増減、最高は予選中の最高レートです。レート固定の人（王者）は公式のレートを出しています。', cols: ['rating', 'bonus', 'total', 'delta', 'high'] },
   { key: 'single', label: '個人戦の成績', note: 'セット内訳（2セット先取）です。先攻取得率は個人戦を1投ごとに記録した試合の集計です。', cols: ['w20', 'w21', 'l12', 'l02', 'first'] },
-  { key: 'throw', label: '投擲', note: 'ヒット率・上がりは、個人の投擲順を入れて1投ごとに記録した試合（チーム戦を含む）の集計です。個人戦ヒット率と平均ブレイクは個人戦だけです。', cols: ['hit', 'throws', 'fin', 's_hit', 'brk'] }
+  { key: 'throw', label: '投擲', note: 'ヒット率・上がりは、個人の投擲順を入れて1投ごとに記録した試合（チーム戦を含む）の集計です。個人戦ヒット率と平均ブレイクは個人戦だけです。', cols: ['hit', 'throws', 'fin', 's_hit', 'brk'] },
+  { key: 'all', label: 'すべて（横スクロール）', wide: true, note: '全項目を1つの表にしています。表を左右にスワイプすると続きを見られます（順位と名前は左に固定）。',
+    groups: [['基本', ['total', 'gap', 'rating', 'bonus', 'need']], ['試合', ['matches', 'wins', 'losses', 'wr', 's_n', 's_w', 's_wr', 't_n', 't_w', 't_wr', 'best', 'cur', 'avg']],
+             ['レート', ['start', 'high', 'low', 'delta']], ['ボーナスの内訳', ['eb_w', 'partners', 'eb_p', 'opponents', 'eb_o', 'rookie']],
+             ['個人戦の成績', ['w20', 'w21', 'l12', 'l02', 's_hit', 'brk', 'fturn', 'lose', 'first', 'second']], ['投擲成績', ['hit', 'throws', 'fin', 'busts']], ['王者（参考）', ['vrate', 'vtotal']]] }
 ];
+STATS_VIEWS.forEach(function (v) { if (v.groups) v.cols = [].concat.apply([], v.groups.map(function (g) { return g[1]; })); });
 function statsRows() {
   var s = S.settings, minM = n(s.min_matches, 15), minT = n(s.min_team_matches, 5), rows = [];
   var pct = function (w, n0) { return n0 ? { v: w / n0, t: (Math.round(w / n0 * 1000) / 10) + '%', sub: w + '/' + n0 } : null; };
@@ -782,7 +799,13 @@ function statsRows() {
     var id = p.id, pf = (S.profiles && S.profiles[id]) || { s_w: 0, s_n: 0, t_w: 0, t_n: 0, wins: 0, losses: 0, matches: 0, avg: null, sets: 0, best: 0, cur: 0, w20: 0, w21: 0, l12: 0, l02: 0 };
     var ts = S.throw_stats && S.throw_stats[id], ss1 = S.singles_stats && S.singles_stats[id], hist = (S.history || {})[id] || [];
     var start = hist.length ? hist[0].rating - hist[0].delta : p.rating, high = Math.max.apply(null, [start].concat(hist.map(function (x) { return x.rating; })));
-    var st = p.stats || { matches: 0, team_matches: 0 };
+    var st = p.stats || { matches: 0, team_matches: 0 }, eb = S.extra_bonus && S.extra_bonus[id], vt = p.fixed && p.virtual_total;
+    var low = Math.min.apply(null, [start].concat(hist.map(function (x) { return x.rating; })));
+    var needM = Math.max(0, minM - st.matches), needT = Math.max(0, minT - st.team_matches);
+    var need = p.fixed ? (vt ? { v: vt.eligible ? 0 : vt.min - vt.matches, t: vt.eligible ? '達成' : 'あと' + (vt.min - vt.matches), sub: '参考合計' } : null)
+      : r ? { v: Math.max(needM, needT), t: !needM && !needT ? '達成' : 'あと' + Math.max(needM, needT), sub: needT ? 'うちチーム戦' + needT : '' } : null;
+    var avgv = function (v, sub) { return v === null || v === undefined ? null : val(v, String(v), sub); };
+    var plus = function (v) { return v === null || v === undefined ? null : val(v, '+' + v); };
     return { id: id, name: p.name, order: order, fixed: !!p.fixed, rankLabel: r ? (r.eligible ? '' : '暫') + r.rank : p.fixed ? '王者' : '-',
       met: p.fixed || (st.matches >= minM && st.team_matches >= minT), c: {
       matches: val(pf.matches), wins: val(pf.wins), losses: val(pf.losses), wr: pct(pf.wins, pf.matches),
@@ -798,9 +821,18 @@ function statsRows() {
       hit: ts && ts.throws ? val(ts.hit_rate, ts.hit_rate + '%', (ts.hits !== undefined ? ts.hits : ts.throws - ts.misses) + '/' + ts.throws) : null,
       throws: ts && ts.throws ? val(ts.throws) : null, fin: ts && ts.throws ? val(ts.wins) : null,
       s_hit: ss1 && ss1.throws ? val(ss1.hit_rate, ss1.hit_rate + '%', ss1.hits + '/' + ss1.throws) : null,
-      brk: ss1 && ss1.break_avg !== null && ss1.break_avg !== undefined ? val(ss1.break_avg, String(ss1.break_avg), ss1.break_sets + 'セット') : null } };
+      brk: ss1 && ss1.break_avg !== null && ss1.break_avg !== undefined ? val(ss1.break_avg, String(ss1.break_avg), ss1.break_sets + 'セット') : null,
+      gap: r && cut !== null ? val(r.total - cut, r.total - cut > 0 ? '+' + (r.total - cut) : r.total - cut < 0 ? '−' + (cut - r.total) : '±0') : null,
+      need: need, s_w: val(pf.s_w), t_w: val(pf.t_w), cur: pf.cur ? val(pf.cur) : null,
+      start: p.fixed ? null : val(start), low: p.fixed ? null : val(low),
+      eb_w: eb ? plus(eb.wins_pt) : null, partners: eb ? val(eb.partners, eb.partners + '人') : null, eb_p: eb ? plus(eb.partners_pt) : null,
+      opponents: eb ? val(eb.opponents, eb.opponents + '人') : null, eb_o: eb ? plus(eb.opponents_pt) : null, rookie: eb && eb.rookie ? plus(eb.rookie_pt) : null,
+      fturn: ss1 ? avgv(ss1.finish_turns_avg, ss1.finish_sets + 'セット') : null, lose: ss1 ? avgv(ss1.lose_avg, ss1.lose_sets + 'セット') : null,
+      second: ss1 && ss1.second_sets ? pct(ss1.second_won, ss1.second_sets) : null, busts: ts && ts.throws ? val(ts.busts || 0) : null,
+      vrate: p.fixed && p.virtual_rating !== undefined && p.virtual_rating !== null ? val(p.virtual_rating) : null, vtotal: vt ? val(vt.total) : null } };
   };
   var seen = {};
+  var q = n(s.qualify_count, 8), cut = S.ranking.length >= q ? S.ranking[q - 1].total : null;
   S.ranking.forEach(function (r, i) { seen[r.player_id] = true; rows.push(mk(P(r.player_id), r, i)); });
   // ランキングに入らない人: レート固定の人（王者）と、不参加にしたが試合の記録がある人を下に
   S.players.forEach(function (p, i) { if (seen[p.id]) return; var pf = S.profiles && S.profiles[p.id]; if (p.fixed || (pf && pf.matches)) rows.push(mk(p, null, 1000 + (p.fixed ? 0 : 500) + i)); });
@@ -808,10 +840,14 @@ function statsRows() {
 }
 var STATS_HEAD = { matches: '試合', wins: '勝', losses: '敗', wr: '勝率', best: '最長<br>連勝', s_n: '個人戦', s_wr: '個人戦<br>勝率', t_n: 'チーム戦', t_wr: 'チーム戦<br>勝率', avg: '1セット<br>平均',
   rating: 'レート', bonus: 'ボーナス', total: '合計', delta: '増減', high: '最高', w20: '2-0<br>勝', w21: '2-1<br>勝', l12: '1-2<br>敗', l02: '0-2<br>敗', first: '先攻<br>取得率',
-  hit: 'ヒット率', throws: '投擲数', fin: '上がり', s_hit: '個人戦<br>ヒット率', brk: '平均<br>ブレイク' };
+  hit: 'ヒット率', throws: '投擲数', fin: '上がり', s_hit: '個人戦<br>ヒット率', brk: '平均<br>ブレイク',
+  gap: '8位<br>との差', need: '最低<br>条件', s_w: '個人戦<br>勝利', t_w: 'チーム戦<br>勝利', cur: '現在の<br>連勝', start: '開始', low: '最低',
+  eb_w: '勝利数<br>ボーナス', partners: '組んだ<br>人数', eb_p: '組んだ人数<br>ボーナス', opponents: '戦った<br>相手', eb_o: '戦った相手<br>ボーナス', rookie: 'ハンデ',
+  fturn: '平均上がり<br>ターン数', lose: '上がれず<br>平均得点', second: '後攻<br>取得率', busts: 'バースト', vrate: '参考<br>レート', vtotal: '参考<br>合計' };
 function viewStatsAll() {
   var V = STATS_VIEWS.filter(function (v) { return v.key === statsView; })[0] || STATS_VIEWS[0];
   if (statsSort.key !== 'rank' && V.cols.indexOf(statsSort.key) < 0) statsSort = { key: 'rank', desc: false };
+  STATS_HEAD.gap = n(S.settings.qualify_count, 8) + '位<br>との差';
   var rows = statsRows(), k = statsSort.key, dir = statsSort.desc ? -1 : 1;
   rows.sort(function (a, b) {
     if (k === 'rank') return (a.order - b.order) * dir;
@@ -821,13 +857,14 @@ function viewStatsAll() {
   });
   var mark = function (key) { return statsSort.key === key ? (statsSort.desc ? '▼' : '▲') : ''; };
   var h = '<div class="card"><h2>全体成績</h2><div class="stview">' + STATS_VIEWS.map(function (v) { return '<button data-stview="' + v.key + '" class="' + (v.key === V.key ? 'on' : '') + '">' + v.label + '</button>'; }).join('') + '</div>' +
-    '<table class="sttable"><thead><tr><th data-stsort="rank" class="' + (k === 'rank' ? 'on' : '') + '">順位' + mark('rank') + '</th><th>名前</th>' +
+    (V.wide ? '<div class="stwide"><table class="sttable wide"><thead><tr class="stgrp"><th class="strk"></th><th class="stnm"></th>' + V.groups.map(function (g) { return '<th colspan="' + g[1].length + '"><span>' + g[0] + '</span></th>'; }).join('') + '</tr>' : '<table class="sttable"><thead>') +
+    '<tr><th data-stsort="rank" class="strk' + (k === 'rank' ? ' on' : '') + '">順位' + mark('rank') + '</th><th class="stnm">名前</th>' +
     V.cols.map(function (c) { return '<th class="num' + (k === c ? ' on' : '') + '" data-stsort="' + c + '">' + STATS_HEAD[c] + mark(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
   rows.forEach(function (r) {
     h += '<tr class="' + (r.fixed ? 'stfx' : '') + '"><td class="strk">' + r.rankLabel + '</td><td class="stnm"><a href="#" data-me="' + esc(r.id) + '">' + esc(r.name) + '</a></td>' +
       V.cols.map(function (c) { var x = r.c[c]; return x ? '<td class="num">' + x.t + (x.sub ? '<small>' + x.sub + '</small>' : '') + '</td>' : '<td class="num na">-</td>'; }).join('') + '</tr>';
   });
-  h += '</tbody></table><p class="muted" style="margin:10px 0 0">見出しを押すと並べ替えます（もう一度押すと逆順）。名前を押すと個人ページを開きます。順位はランキングの順位で、「暫」は最低条件をまだ満たしていない人です。' + V.note + '「-」は記録がない項目です。</p></div>';
+  h += '</tbody></table>' + (V.wide ? '</div>' : '') + '<p class="muted" style="margin:10px 0 0">見出しを押すと並べ替えます（もう一度押すと逆順）。名前を押すと個人ページを開きます。順位はランキングの順位で、「暫」は最低条件をまだ満たしていない人です。' + V.note + '「-」は記録がない項目です。</p></div>';
   return h;
 }
 function myAwards(id) {
