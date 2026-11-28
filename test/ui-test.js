@@ -319,6 +319,19 @@ const server = http.createServer((req, res) => {
   await page.screenshot({ path: path.join(out, '11_me_stats.png'), fullPage: true });
 
   await page.click('nav button[data-tab=awards]');
+  // 成績タブ: 最初は全体成績の表。見出しで並べ替え、表の切り替え
+  await page.waitForSelector('.sttable');
+  {
+    const names = await page.$$eval('.sttable tbody tr', trs => trs.map(t => t.children[1].textContent));
+    if (names.length < 11 || !names.includes('王者') || names[names.length - 1] !== '王者') throw new Error('全体成績の行がおかしい: ' + names);
+    await page.click('.sttable th[data-stsort=wins]');
+    const w = await page.$$eval('.sttable tbody tr', trs => trs.map(t => Number(t.children[3].textContent)));
+    if (w.some((x, i) => i && x > w[i - 1])) throw new Error('勝の並べ替えNG: ' + w);
+    for (const v of ['type', 'rate', 'single', 'throw']) { await page.click('[data-stview=' + v + ']'); await page.waitForSelector('[data-stview=' + v + '].on'); }
+    await page.click('[data-stview=win]');
+  }
+  await page.screenshot({ path: path.join(out, '12a_stats.png'), fullPage: true });
+  await page.click('[data-stsec=awards]');
   await page.waitForSelector('.award');
   {
     const chk = await page.evaluate(() => [...document.querySelectorAll('.award')].map(a => ({
@@ -519,7 +532,7 @@ const server = http.createServer((req, res) => {
     await vp.waitForSelector('table');
     const tabs = await vp.$$eval('#tabs button', b => b.filter(x => !x.hidden).map(x => x.textContent.trim()));
     console.log('view tabs:', tabs.join(' / '));
-    if (tabs.join('/') !== 'ランキング/試合/個人/特別賞/ルール') throw new Error('観戦用ページのタブがおかしい: ' + tabs);
+    if (tabs.join('/') !== 'ランキング/試合/個人/成績/ルール') throw new Error('観戦用ページのタブがおかしい: ' + tabs);
     if (await vp.isVisible('#adminBtn')) throw new Error('観戦用ページに運営ボタンがある');
     if (await vp.isVisible('#ruleBtn')) throw new Error('観戦用ページにルールボタンがある（タブで出す）');
     if (!(await vp.isVisible('#reloadBtn'))) throw new Error('観戦用ページに更新ボタンがない');
